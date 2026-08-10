@@ -220,6 +220,7 @@ verticalbroker-aws-platform/
 | `cognito.tf` | User Pool (MFA), resource server (8 scopes), identity pool | JWT authentication |
 | `step_functions.tf` | Pipeline orchestrator (7 states), IAM, logging | ETL coordination |
 | `dynamodb.tf` | 5 tables (Idempotency, CircuitBreaker, Orders, Outbox, Portfolio) | State management |
+| `aurora_postgresql.tf` | Aurora PostgreSQL Serverless v2 (1 writer + 2 readers), Multi-AZ, KMS, CDC source | ACID ledger (source of truth) |
 
 ### Module 6: Analytics (`terraform/modules/analytics/`)
 
