@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mxfile host="app.diagrams.net">
+  <diagram name="VPC Network Layout" id="vpc-net">
+    <mxGraphModel dx="1200" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1200" pageHeight="900">
+      <root>
+        <mxCell id="0" /><mxCell id="1" parent="0" />
+        <mxCell id="title" value="VPC Network Architecture (10.0.0.0/16) — No Internet Access" style="text;fontSize=16;fontStyle=1;" vertex="1" parent="1"><mxGeometry x="30" y="10" width="500" height="30" as="geometry" /></mxCell>
+        <mxCell id="tgw" value="Transit Gateway&#10;(Hub)&#10;Prod ↔ Shared only&#10;Blackhole to non-prod" style="rounded=1;whiteSpace=wrap;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1;" vertex="1" parent="1"><mxGeometry x="470" y="50" width="180" height="70" as="geometry" /></mxCell>
+        <mxCell id="vpc" value="Production VPC (10.0.0.0/16)" style="swimlane;startSize=30;fillColor=#f5f5f5;strokeColor=#666666;fontStyle=1;fontSize=13;" vertex="1" parent="1"><mxGeometry x="30" y="150" width="1140" height="600" as="geometry" /></mxCell>
+        <mxCell id="data_az1" value="Data Subnet AZ-a&#10;10.0.1.0/24" style="rounded=1;whiteSpace=wrap;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="vpc"><mxGeometry x="30" y="50" width="150" height="50" as="geometry" /></mxCell>
+        <mxCell id="data_az2" value="Data Subnet AZ-b&#10;10.0.2.0/24" style="rounded=1;whiteSpace=wrap;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="vpc"><mxGeometry x="30" y="120" width="150" height="50" as="geometry" /></mxCell>
+        <mxCell id="data_az3" value="Data Subnet AZ-c&#10;10.0.3.0/24" style="rounded=1;whiteSpace=wrap;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="vpc"><mxGeometry x="30" y="190" width="150" height="50" as="geometry" /></mxCell>
+        <mxCell id="comp_az1" value="Compute Subnet AZ-a&#10;10.0.4.0/24" style="rounded=1;whiteSpace=wrap;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="vpc"><mxGeometry x="30" y="280" width="150" height="50" as="geometry" /></mxCell>
+        <mxCell id="comp_az2" value="Compute Subnet AZ-b&#10;10.0.5.0/24" style="rounded=1;whiteSpace=wrap;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="vpc"><mxGeometry x="30" y="350" width="150" height="50" as="geometry" /></mxCell>
+        <mxCell id="comp_az3" value="Compute Subnet AZ-c&#10;10.0.6.0/24" style="rounded=1;whiteSpace=wrap;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="vpc"><mxGeometry x="30" y="420" width="150" height="50" as="geometry" /></mxCell>
+        <mxCell id="vpe_title" value="VPC Endpoints (No Internet Required)" style="text;fontSize=12;fontStyle=1;" vertex="1" parent="vpc"><mxGeometry x="250" y="40" width="300" height="20" as="geometry" /></mxCell>
+        <mxCell id="vpe_s3" value="S3 Gateway" style="rounded=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="vpc"><mxGeometry x="250" y="70" width="100" height="35" as="geometry" /></mxCell>
+        <mxCell id="vpe_ddb" value="DynamoDB Gateway" style="rounded=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="vpc"><mxGeometry x="370" y="70" width="130" height="35" as="geometry" /></mxCell>
+        <mxCell id="vpe_glue" value="Glue Interface" style="rounded=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="vpc"><mxGeometry x="250" y="120" width="100" height="35" as="geometry" /></mxCell>
+        <mxCell id="vpe_kms" value="KMS Interface" style="rounded=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="vpc"><mxGeometry x="370" y="120" width="100" height="35" as="geometry" /></mxCell>
+        <mxCell id="vpe_sqs" value="SQS Interface" style="rounded=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="vpc"><mxGeometry x="490" y="120" width="100" height="35" as="geometry" /></mxCell>
+        <mxCell id="vpe_eb" value="EventBridge Interface" style="rounded=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="vpc"><mxGeometry x="250" y="170" width="140" height="35" as="geometry" /></mxCell>
+        <mxCell id="vpe_cw" value="CloudWatch Interface" style="rounded=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="vpc"><mxGeometry x="410" y="170" width="140" height="35" as="geometry" /></mxCell>
+        <mxCell id="vpe_sts" value="STS Interface" style="rounded=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="vpc"><mxGeometry x="570" y="170" width="100" height="35" as="geometry" /></mxCell>
+        <mxCell id="vpe_apigw" value="execute-api&#10;(PrivateLink)" style="rounded=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1;" vertex="1" parent="vpc"><mxGeometry x="520" y="70" width="110" height="35" as="geometry" /></mxCell>
+        <mxCell id="sg_title" value="Security Groups (deny-by-default)" style="text;fontSize=12;fontStyle=1;" vertex="1" parent="vpc"><mxGeometry x="250" y="240" width="300" height="20" as="geometry" /></mxCell>
+        <mxCell id="sg_data" value="SG: data-tier&#10;Glue, DMS, Lake Formation" style="rounded=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="vpc"><mxGeometry x="250" y="270" width="170" height="40" as="geometry" /></mxCell>
+        <mxCell id="sg_compute" value="SG: compute-tier&#10;Lambda, Step Functions" style="rounded=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="vpc"><mxGeometry x="250" y="320" width="170" height="40" as="geometry" /></mxCell>
+        <mxCell id="sg_analytics" value="SG: analytics-tier&#10;OpenSearch, Neptune" style="rounded=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="vpc"><mxGeometry x="250" y="370" width="170" height="40" as="geometry" /></mxCell>
+        <mxCell id="sg_ml" value="SG: ml-tier&#10;SageMaker" style="rounded=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="vpc"><mxGeometry x="250" y="420" width="170" height="40" as="geometry" /></mxCell>
+        <mxCell id="sg_stream" value="SG: streaming-tier&#10;Kinesis, DMS" style="rounded=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="vpc"><mxGeometry x="450" y="270" width="170" height="40" as="geometry" /></mxCell>
+        <mxCell id="sg_db" value="SG: database-tier&#10;Aurora (5432), Neptune (8182)" style="rounded=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="vpc"><mxGeometry x="450" y="320" width="200" height="40" as="geometry" /></mxCell>
+        <mxCell id="nacl" value="NACLs: deny-by-default + explicit allow (VPC CIDR + HTTPS + ephemeral)" style="text;fontSize=10;fontStyle=2;fillColor=#f5f5f5;strokeColor=#666666;rounded=1;" vertex="1" parent="vpc"><mxGeometry x="250" y="480" width="500" height="25" as="geometry" /></mxCell>
+        <mxCell id="flowlog" value="VPC Flow Logs → CloudWatch (90-day retention)" style="text;fontSize=10;fontStyle=2;fillColor=#f5f5f5;strokeColor=#666666;rounded=1;" vertex="1" parent="vpc"><mxGeometry x="250" y="510" width="350" height="25" as="geometry" /></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

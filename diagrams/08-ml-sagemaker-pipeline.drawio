@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mxfile host="app.diagrams.net">
+  <diagram name="ML SageMaker RL Advisory Pipeline" id="ml-pipeline">
+    <mxGraphModel dx="1200" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1200" pageHeight="700">
+      <root>
+        <mxCell id="0" /><mxCell id="1" parent="0" />
+        <mxCell id="title" value="SageMaker RL Advisory Pipeline (Training → Deployment → Inference)" style="text;fontSize=16;fontStyle=1;" vertex="1" parent="1"><mxGeometry x="30" y="10" width="600" height="30" as="geometry" /></mxCell>
+        <mxCell id="train_title" value="TRAINING PIPELINE (Weekly)" style="text;fontSize=13;fontStyle=1;fillColor=#dae8fc;strokeColor=#6c8ebf;rounded=1;" vertex="1" parent="1"><mxGeometry x="30" y="50" width="1140" height="22" as="geometry" /></mxCell>
+        <mxCell id="gold" value="S3 Gold Layer&#10;Historical Client&#10;Outcomes" style="shape=cylinder3;whiteSpace=wrap;boundedLbl=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1"><mxGeometry x="30" y="90" width="130" height="70" as="geometry" /></mxCell>
+        <mxCell id="feat" value="Feature Engineering&#10;(ml.m5.xlarge)&#10;Extract profiles +&#10;market features" style="rounded=1;whiteSpace=wrap;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1"><mxGeometry x="200" y="90" width="150" height="70" as="geometry" /></mxCell>
+        <mxCell id="train" value="RL Training (PPO)&#10;(ml.p3.2xlarge GPU)&#10;lr=0.0003 | γ=0.99&#10;10K episodes | batch=256" style="rounded=1;whiteSpace=wrap;fillColor=#fff2cc;strokeColor=#d6b656;fontStyle=1;" vertex="1" parent="1"><mxGeometry x="390" y="85" width="170" height="80" as="geometry" /></mxCell>
+        <mxCell id="eval" value="Evaluation&#10;Performance metrics&#10;Bias detection&#10;Fairness (5% threshold)&#10;SHAP explainability" style="rounded=1;whiteSpace=wrap;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1"><mxGeometry x="600" y="80" width="160" height="90" as="geometry" /></mxCell>
+        <mxCell id="reg" value="Model Registry&#10;Version + metadata&#10;PendingManualApproval" style="rounded=1;whiteSpace=wrap;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1"><mxGeometry x="800" y="90" width="160" height="70" as="geometry" /></mxCell>
+        <mxCell id="ef1" edge="1" source="gold" target="feat" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ef2" edge="1" source="feat" target="train" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ef3" edge="1" source="train" target="eval" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ef4" edge="1" source="eval" target="reg" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="gov_title" value="GOVERNANCE GATE" style="text;fontSize=13;fontStyle=1;fillColor=#f8cecc;strokeColor=#b85450;rounded=1;" vertex="1" parent="1"><mxGeometry x="30" y="200" width="1140" height="22" as="geometry" /></mxCell>
+        <mxCell id="bias" value="check_bias()&#10;Age | Income&#10;Filing Status groups" style="rounded=1;whiteSpace=wrap;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1"><mxGeometry x="100" y="240" width="150" height="60" as="geometry" /></mxCell>
+        <mxCell id="fair" value="validate_fairness()&#10;Max 5% deviation&#10;across all groups" style="rounded=1;whiteSpace=wrap;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1"><mxGeometry x="300" y="240" width="150" height="60" as="geometry" /></mxCell>
+        <mxCell id="shap" value="generate_explainability()&#10;SHAP feature importance&#10;Top 10 features" style="rounded=1;whiteSpace=wrap;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1"><mxGeometry x="500" y="240" width="170" height="60" as="geometry" /></mxCell>
+        <mxCell id="approve" value="approve_for_deployment()&#10;APPROVED | REJECTED&#10;PENDING_REVIEW" style="rhombus;whiteSpace=wrap;fillColor=#f8cecc;strokeColor=#b85450;fontStyle=1;" vertex="1" parent="1"><mxGeometry x="730" y="230" width="200" height="80" as="geometry" /></mxCell>
+        <mxCell id="ef5" edge="1" source="bias" target="fair" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ef6" edge="1" source="fair" target="shap" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ef7" edge="1" source="shap" target="approve" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="deploy_title" value="DEPLOYMENT (A/B Testing)" style="text;fontSize=13;fontStyle=1;fillColor=#d5e8d4;strokeColor=#82b366;rounded=1;" vertex="1" parent="1"><mxGeometry x="30" y="340" width="1140" height="22" as="geometry" /></mxCell>
+        <mxCell id="ep_prod" value="Production Variant&#10;90% traffic&#10;Auto-scale 1-10" style="rounded=1;whiteSpace=wrap;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;" vertex="1" parent="1"><mxGeometry x="200" y="380" width="150" height="60" as="geometry" /></mxCell>
+        <mxCell id="ep_canary" value="Canary Variant&#10;10% traffic&#10;New model testing" style="rounded=1;whiteSpace=wrap;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1"><mxGeometry x="200" y="460" width="150" height="60" as="geometry" /></mxCell>
+        <mxCell id="endpoint" value="SageMaker Endpoint&#10;Real-time Inference&#10;&lt; 500ms P95" style="rounded=1;whiteSpace=wrap;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;fontSize=12;" vertex="1" parent="1"><mxGeometry x="30" y="410" width="140" height="70" as="geometry" /></mxCell>
+        <mxCell id="ef8" edge="1" source="endpoint" target="ep_prod" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ef9" edge="1" source="endpoint" target="ep_canary" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="infer_title" value="INFERENCE FLOW" style="text;fontSize=13;fontStyle=1;fillColor=#fff2cc;strokeColor=#d6b656;rounded=1;" vertex="1" parent="1"><mxGeometry x="30" y="550" width="1140" height="22" as="geometry" /></mxCell>
+        <mxCell id="client_req" value="POST /v1/advisory&#10;CustomerProfile" style="rounded=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1"><mxGeometry x="30" y="590" width="130" height="50" as="geometry" /></mxCell>
+        <mxCell id="validate_in" value="Validate Input&#10;age 18-120&#10;income >= 0" style="rounded=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1"><mxGeometry x="190" y="590" width="120" height="50" as="geometry" /></mxCell>
+        <mxCell id="invoke_sm" value="Invoke SageMaker&#10;(&lt; 500ms SLA)" style="rounded=1;fillColor=#fff2cc;strokeColor=#d6b656;fontStyle=1;" vertex="1" parent="1"><mxGeometry x="340" y="590" width="130" height="50" as="geometry" /></mxCell>
+        <mxCell id="gov_check" value="Governance&#10;confidence &lt; 0.7?&#10;→ human_review" style="rounded=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1"><mxGeometry x="500" y="590" width="130" height="50" as="geometry" /></mxCell>
+        <mxCell id="finra_log" value="FINRA Log&#10;S3 COMPLIANCE&#10;7-year retention" style="rounded=1;fillColor=#f8cecc;strokeColor=#b85450;fontStyle=1;" vertex="1" parent="1"><mxGeometry x="660" y="590" width="130" height="50" as="geometry" /></mxCell>
+        <mxCell id="response" value="Return&#10;Recommendation&#10;+ correlation_id" style="rounded=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1"><mxGeometry x="820" y="590" width="130" height="50" as="geometry" /></mxCell>
+        <mxCell id="efi1" edge="1" source="client_req" target="validate_in" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="efi2" edge="1" source="validate_in" target="invoke_sm" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="efi3" edge="1" source="invoke_sm" target="gov_check" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="efi4" edge="1" source="gov_check" target="finra_log" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="efi5" edge="1" source="finra_log" target="response" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

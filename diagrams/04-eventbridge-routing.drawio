@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mxfile host="app.diagrams.net">
+  <diagram name="EventBridge Event Routing" id="eb-routing">
+    <mxGraphModel dx="1200" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1200" pageHeight="700">
+      <root>
+        <mxCell id="0" /><mxCell id="1" parent="0" />
+        <mxCell id="title" value="EventBridge Event Routing — verticalbroker-platform bus" style="text;fontSize=16;fontStyle=1;" vertex="1" parent="1"><mxGeometry x="30" y="10" width="500" height="30" as="geometry" /></mxCell>
+        <mxCell id="p1" value="Market Data&#10;Service" style="rounded=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1"><mxGeometry x="30" y="70" width="120" height="50" as="geometry" /></mxCell>
+        <mxCell id="p2" value="Order&#10;Manager" style="rounded=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1"><mxGeometry x="30" y="140" width="120" height="50" as="geometry" /></mxCell>
+        <mxCell id="p3" value="ETL&#10;Engine" style="rounded=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1"><mxGeometry x="30" y="210" width="120" height="50" as="geometry" /></mxCell>
+        <mxCell id="p4" value="Security&#10;Services" style="rounded=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1"><mxGeometry x="30" y="280" width="120" height="50" as="geometry" /></mxCell>
+        <mxCell id="p5" value="Advisory&#10;Agent" style="rounded=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1"><mxGeometry x="30" y="350" width="120" height="50" as="geometry" /></mxCell>
+        <mxCell id="bus" value="EventBridge Bus&#10;verticalbroker-platform&#10;+ Schema Registry (5 schemas)&#10;+ Archive (30-day)" style="rounded=1;whiteSpace=wrap;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1;fontSize=12;" vertex="1" parent="1"><mxGeometry x="250" y="160" width="220" height="100" as="geometry" /></mxCell>
+        <mxCell id="r1" value="data.ingested" style="text;fontSize=10;fontStyle=1;fillColor=#d5e8d4;rounded=1;" vertex="1" parent="1"><mxGeometry x="530" y="70" width="100" height="20" as="geometry" /></mxCell>
+        <mxCell id="r2" value="trade.executed" style="text;fontSize=10;fontStyle=1;fillColor=#d5e8d4;rounded=1;" vertex="1" parent="1"><mxGeometry x="530" y="140" width="100" height="20" as="geometry" /></mxCell>
+        <mxCell id="r3" value="pipeline.failed" style="text;fontSize=10;fontStyle=1;fillColor=#d5e8d4;rounded=1;" vertex="1" parent="1"><mxGeometry x="530" y="210" width="100" height="20" as="geometry" /></mxCell>
+        <mxCell id="r4" value="compliance.alert" style="text;fontSize=10;fontStyle=1;fillColor=#d5e8d4;rounded=1;" vertex="1" parent="1"><mxGeometry x="530" y="280" width="110" height="20" as="geometry" /></mxCell>
+        <mxCell id="r5" value="advisory.generated" style="text;fontSize=10;fontStyle=1;fillColor=#d5e8d4;rounded=1;" vertex="1" parent="1"><mxGeometry x="530" y="350" width="120" height="20" as="geometry" /></mxCell>
+        <mxCell id="t1" value="Step Functions&#10;(ETL Orchestrator)" style="rounded=1;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;" vertex="1" parent="1"><mxGeometry x="720" y="60" width="150" height="40" as="geometry" /></mxCell>
+        <mxCell id="t2" value="SQS FIFO&#10;trade-processing.fifo" style="rounded=1;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;" vertex="1" parent="1"><mxGeometry x="720" y="130" width="150" height="40" as="geometry" /></mxCell>
+        <mxCell id="t3" value="CloudWatch Logs&#10;+ SNS (Ops Team)" style="rounded=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1"><mxGeometry x="720" y="200" width="150" height="40" as="geometry" /></mxCell>
+        <mxCell id="t4" value="SNS&#10;Security Team" style="rounded=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1"><mxGeometry x="720" y="270" width="150" height="40" as="geometry" /></mxCell>
+        <mxCell id="t5" value="CloudWatch Logs&#10;(Audit Trail)" style="rounded=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1"><mxGeometry x="720" y="340" width="150" height="40" as="geometry" /></mxCell>
+        <mxCell id="dlq" value="DLQ&#10;(failed delivery)" style="rounded=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1"><mxGeometry x="720" y="410" width="120" height="40" as="geometry" /></mxCell>
+        <mxCell id="ea1" edge="1" source="p1" target="bus" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ea2" edge="1" source="p2" target="bus" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ea3" edge="1" source="p3" target="bus" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ea4" edge="1" source="p4" target="bus" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ea5" edge="1" source="p5" target="bus" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="eb1" edge="1" source="r1" target="t1" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="eb2" edge="1" source="r2" target="t2" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="eb3" edge="1" source="r3" target="t3" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="eb4" edge="1" source="r4" target="t4" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="eb5" edge="1" source="r5" target="t5" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

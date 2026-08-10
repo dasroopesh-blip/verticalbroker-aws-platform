@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mxfile host="app.diagrams.net">
+  <diagram name="Disaster Recovery and Failover" id="dr-failover">
+    <mxGraphModel dx="1200" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1200" pageHeight="700">
+      <root>
+        <mxCell id="0" /><mxCell id="1" parent="0" />
+        <mxCell id="title" value="Disaster Recovery: RTO 4h / RPO 1h — Failover Procedure" style="text;fontSize=16;fontStyle=1;" vertex="1" parent="1"><mxGeometry x="30" y="10" width="500" height="30" as="geometry" /></mxCell>
+        <mxCell id="primary" value="PRIMARY REGION (us-east-1)" style="swimlane;startSize=25;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1;fontSize=12;" vertex="1" parent="1"><mxGeometry x="30" y="60" width="500" height="350" as="geometry" /></mxCell>
+        <mxCell id="p_api" value="API Gateway" style="rounded=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="primary"><mxGeometry x="30" y="40" width="120" height="40" as="geometry" /></mxCell>
+        <mxCell id="p_lambda" value="Lambda Functions (7)" style="rounded=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="primary"><mxGeometry x="30" y="100" width="140" height="40" as="geometry" /></mxCell>
+        <mxCell id="p_s3" value="S3 Bronze/Gold&#10;(Source)" style="shape=cylinder3;whiteSpace=wrap;boundedLbl=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="primary"><mxGeometry x="30" y="160" width="120" height="60" as="geometry" /></mxCell>
+        <mxCell id="p_ddb" value="DynamoDB&#10;Global Tables" style="shape=cylinder3;whiteSpace=wrap;boundedLbl=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="primary"><mxGeometry x="30" y="240" width="120" height="60" as="geometry" /></mxCell>
+        <mxCell id="p_kinesis" value="Kinesis Streams" style="rounded=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="primary"><mxGeometry x="200" y="40" width="120" height="40" as="geometry" /></mxCell>
+        <mxCell id="p_aurora" value="Aurora&#10;PostgreSQL&#10;Writer" style="shape=cylinder3;whiteSpace=wrap;boundedLbl=1;fillColor=#f8cecc;strokeColor=#b85450;fontStyle=1;" vertex="1" parent="primary"><mxGeometry x="200" y="100" width="100" height="70" as="geometry" /></mxCell>
+        <mxCell id="p_glue" value="Glue ETL Jobs" style="rounded=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="primary"><mxGeometry x="200" y="200" width="120" height="40" as="geometry" /></mxCell>
+        <mxCell id="r53" value="Route 53&#10;Health Checks&#10;DNS Failover" style="rounded=1;whiteSpace=wrap;fillColor=#e1d5e7;strokeColor=#9673a6;fontStyle=1;fontSize=12;" vertex="1" parent="1"><mxGeometry x="550" y="100" width="130" height="70" as="geometry" /></mxCell>
+        <mxCell id="dr" value="DR REGION (us-west-2)" style="swimlane;startSize=25;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;fontSize=12;" vertex="1" parent="1"><mxGeometry x="700" y="60" width="470" height="350" as="geometry" /></mxCell>
+        <mxCell id="d_api" value="API Gateway&#10;(Pre-provisioned)" style="rounded=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="dr"><mxGeometry x="30" y="40" width="140" height="40" as="geometry" /></mxCell>
+        <mxCell id="d_lambda" value="Lambda Functions&#10;(Deployed)" style="rounded=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="dr"><mxGeometry x="30" y="100" width="140" height="40" as="geometry" /></mxCell>
+        <mxCell id="d_s3" value="S3 Replica&#10;CRR &lt; 15min" style="shape=cylinder3;whiteSpace=wrap;boundedLbl=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="dr"><mxGeometry x="30" y="160" width="120" height="60" as="geometry" /></mxCell>
+        <mxCell id="d_ddb" value="DynamoDB&#10;Global Tables&#10;(Active-Active)" style="shape=cylinder3;whiteSpace=wrap;boundedLbl=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="dr"><mxGeometry x="30" y="240" width="130" height="60" as="geometry" /></mxCell>
+        <mxCell id="d_kinesis" value="Kinesis Streams&#10;(Standby)" style="rounded=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="dr"><mxGeometry x="220" y="40" width="120" height="40" as="geometry" /></mxCell>
+        <mxCell id="d_glue" value="Glue ETL Jobs&#10;(Start on failover)" style="rounded=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="dr"><mxGeometry x="220" y="100" width="140" height="40" as="geometry" /></mxCell>
+        <mxCell id="crr1" style="dashed=1;strokeColor=#82b366;" edge="1" source="p_s3" target="d_s3" parent="1" value="CRR &lt;15min"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="crr2" style="dashed=1;strokeColor=#6c8ebf;" edge="1" source="p_ddb" target="d_ddb" parent="1" value="Global Tables"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="r53_p" edge="1" source="r53" target="p_api" parent="1" value="Healthy"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="r53_d" style="strokeColor=#b85450;strokeWidth=2;" edge="1" source="r53" target="d_api" parent="1" value="Failover"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="timeline" value="Failover Timeline:&#10;1. Health check fails (30s) → 2. DNS failover (60s TTL) → 3. DR Lambda active (0s) →&#10;4. DynamoDB active (0s) → 5. Verify CRR lag &lt;1h (5min) → 6. Activate DR Kinesis (30min) →&#10;7. Start DR Glue (60min) → 8. Verify E2E (30min) = TOTAL ~2.5h (within 4h RTO)" style="text;whiteSpace=wrap;fontSize=11;fillColor=#f5f5f5;strokeColor=#666666;rounded=1;" vertex="1" parent="1"><mxGeometry x="30" y="440" width="700" height="70" as="geometry" /></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

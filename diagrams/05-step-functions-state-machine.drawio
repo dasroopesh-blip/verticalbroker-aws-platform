@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mxfile host="app.diagrams.net">
+  <diagram name="Step Functions - ETL Pipeline Orchestrator" id="sfn">
+    <mxGraphModel dx="1000" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1000" pageHeight="900">
+      <root>
+        <mxCell id="0" /><mxCell id="1" parent="0" />
+        <mxCell id="title" value="Step Functions: ETL Pipeline Orchestrator" style="text;fontSize=16;fontStyle=1;" vertex="1" parent="1"><mxGeometry x="30" y="10" width="400" height="30" as="geometry" /></mxCell>
+        <mxCell id="start" value="" style="ellipse;fillColor=#000000;" vertex="1" parent="1"><mxGeometry x="460" y="50" width="30" height="30" as="geometry" /></mxCell>
+        <mxCell id="s1" value="ValidateInput&#10;(Lambda)" style="rounded=1;whiteSpace=wrap;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1"><mxGeometry x="400" y="110" width="150" height="50" as="geometry" /></mxCell>
+        <mxCell id="s2" value="CheckPartition&#10;(Choice)" style="rhombus;whiteSpace=wrap;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1"><mxGeometry x="410" y="200" width="130" height="80" as="geometry" /></mxCell>
+        <mxCell id="s3" value="TriggerBronzeToSilver&#10;(Glue startJobRun.sync)&#10;Retry: 3x / 60s / 2.0 backoff" style="rounded=1;whiteSpace=wrap;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;" vertex="1" parent="1"><mxGeometry x="370" y="320" width="210" height="60" as="geometry" /></mxCell>
+        <mxCell id="s4" value="TriggerSilverToGold&#10;(Glue startJobRun.sync)&#10;Retry: 3x / 60s / 2.0 backoff" style="rounded=1;whiteSpace=wrap;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;" vertex="1" parent="1"><mxGeometry x="370" y="420" width="210" height="60" as="geometry" /></mxCell>
+        <mxCell id="s5" value="TriggerIndexing&#10;(Parallel)" style="rounded=1;whiteSpace=wrap;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1"><mxGeometry x="400" y="520" width="150" height="50" as="geometry" /></mxCell>
+        <mxCell id="s5a" value="Update&#10;OpenSearch" style="rounded=1;whiteSpace=wrap;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1"><mxGeometry x="280" y="600" width="100" height="40" as="geometry" /></mxCell>
+        <mxCell id="s5b" value="Update&#10;Neptune" style="rounded=1;whiteSpace=wrap;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1"><mxGeometry x="560" y="600" width="100" height="40" as="geometry" /></mxCell>
+        <mxCell id="success" value="EmitSuccess&#10;(EventBridge put)" style="rounded=1;whiteSpace=wrap;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;" vertex="1" parent="1"><mxGeometry x="400" y="680" width="150" height="40" as="geometry" /></mxCell>
+        <mxCell id="failure" value="EmitFailure&#10;pipeline.failed event" style="rounded=1;whiteSpace=wrap;fillColor=#f8cecc;strokeColor=#b85450;fontStyle=1;" vertex="1" parent="1"><mxGeometry x="700" y="370" width="150" height="40" as="geometry" /></mxCell>
+        <mxCell id="skip" value="SkipProcessing&#10;(Succeed)" style="rounded=1;whiteSpace=wrap;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1"><mxGeometry x="150" y="220" width="130" height="40" as="geometry" /></mxCell>
+        <mxCell id="error" value="EmitError&#10;validation error" style="rounded=1;whiteSpace=wrap;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1"><mxGeometry x="700" y="120" width="130" height="40" as="geometry" /></mxCell>
+        <mxCell id="end" value="" style="ellipse;fillColor=#000000;strokeColor=#000000;" vertex="1" parent="1"><mxGeometry x="460" y="750" width="30" height="30" as="geometry" /></mxCell>
+        <mxCell id="x1" edge="1" source="start" target="s1" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="x2" edge="1" source="s1" target="s2" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="x3" edge="1" source="s2" target="s3" parent="1" value="New Partition"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="x4" edge="1" source="s2" target="skip" parent="1" value="Already Processed"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="x5" edge="1" source="s3" target="s4" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="x6" edge="1" source="s4" target="s5" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="x7" edge="1" source="s5" target="s5a" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="x8" edge="1" source="s5" target="s5b" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="x9" edge="1" source="s5a" target="success" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="x10" edge="1" source="s5b" target="success" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="x11" edge="1" source="success" target="end" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="x12" edge="1" source="s3" target="failure" parent="1" value="Catch" style="strokeColor=#b85450;dashed=1;"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="x13" edge="1" source="s4" target="failure" parent="1" value="Catch" style="strokeColor=#b85450;dashed=1;"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="x14" edge="1" source="s1" target="error" parent="1" value="Catch" style="strokeColor=#b85450;dashed=1;"><mxGeometry relative="1" as="geometry" /></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
