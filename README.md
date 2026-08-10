@@ -512,3 +512,48 @@ aws s3 sync src/etl/ s3://vb-glue-scripts-dev/src/etl/
 
 Private preparation material for Vertical Relevance technical pairing interview.
 
+
+---
+
+## Database Architecture Summary
+
+| Database | Type | Purpose | Consistency |
+|----------|------|---------|-------------|
+| **Aurora PostgreSQL** | Relational (ACID) | Order/Wallet/Ledger — **source of truth** | Strong (synchronous) |
+| **DynamoDB** | Key-Value/Document | Lambda operational state (idempotency, outbox, circuit breaker) | Per-item ACID transactions |
+| **Neptune** | Graph (Gremlin) | Fraud detection, client networks, instrument correlations | Eventual |
+| **OpenSearch** | Search/Analytics | Full-text search, dashboards, near-real-time analytics | Eventual (~10 min lag) |
+| **S3 (Parquet)** | Object/Data Lake | Bronze/Silver/Gold medallion layers (10 PB) | Immutable (Object Lock) |
+| **Athena** | SQL Engine | Ad-hoc queries against S3 data lake | Read-only |
+
+### Data Flow: Aurora → CDC → Lake → Analytics → ML
+
+```
+[Aurora PostgreSQL]  ←── ACID writes (orders, wallets, trades)
+        │
+        │ DMS CDC (< 30s latency, full-load + ongoing replication)
+        ▼
+[S3 Bronze Layer]  ──► [Glue PySpark] ──► [S3 Silver] ──► [S3 Gold]
+                                                              │
+                              ┌────────────────┬──────────────┼──────────────┐
+                              ▼                ▼              ▼              ▼
+                        [OpenSearch]      [Neptune]      [Athena]     [SageMaker RL]
+                        (search/dash)    (fraud/graph)   (SQL)        (training)
+```
+
+### Key Interview Answer: "Why Not Just DynamoDB for Everything?"
+
+> Aurora PostgreSQL is the **ledger truth** because:
+> - ACID transactions across multiple tables (order + wallet + position in one commit)
+> - SQL joins for reconciliation and regulatory reporting
+> - CDC/logical replication for downstream decoupling
+> - FINRA requires auditable, relational transaction history
+>
+> DynamoDB is used **only** for Lambda operational patterns:
+> - Idempotency tokens (24h TTL, single-key access)
+> - Circuit breaker state (single-key conditional writes)
+> - Transactional outbox (DynamoDB Streams → EventBridge)
+> - Portfolio position cache (fast key-value lookups)
+>
+> "I separate the strongly-consistent write path from the replayable analytical path, then connect them through durable, governed events."
+
