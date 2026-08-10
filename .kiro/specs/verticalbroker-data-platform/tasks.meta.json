@@ -1,0 +1,494 @@
+{
+  "pbtResults": {},
+  "executionHistory": {
+    "1.1 Create Terraform project structure and backend configuration": [
+      {
+        "executionId": "f434d6eb-6434-40bb-b020-68ac47aeecc1",
+        "chatSessionId": "51da6dce-2374-4700-ad78-57db4714546e",
+        "timestamp": 1786329083451
+      },
+      {
+        "executionId": "f434d6eb-6434-40bb-b020-68ac47aeecc1",
+        "chatSessionId": "51da6dce-2374-4700-ad78-57db4714546e",
+        "timestamp": 1786329099805
+      },
+      {
+        "executionId": "f434d6eb-6434-40bb-b020-68ac47aeecc1",
+        "chatSessionId": "51da6dce-2374-4700-ad78-57db4714546e",
+        "timestamp": 1786329358850
+      }
+    ],
+    "1.2 Implement AWS Organizations and multi-account structure": [
+      {
+        "executionId": "f434d6eb-6434-40bb-b020-68ac47aeecc1",
+        "chatSessionId": "51da6dce-2374-4700-ad78-57db4714546e",
+        "timestamp": 1786329083455
+      },
+      {
+        "executionId": "f434d6eb-6434-40bb-b020-68ac47aeecc1",
+        "chatSessionId": "51da6dce-2374-4700-ad78-57db4714546e",
+        "timestamp": 1786329366636
+      },
+      {
+        "executionId": "f434d6eb-6434-40bb-b020-68ac47aeecc1",
+        "chatSessionId": "51da6dce-2374-4700-ad78-57db4714546e",
+        "timestamp": 1786329807209
+      }
+    ],
+    "1.3 Implement networking module with VPC, subnets, and Transit Gateway": [
+      {
+        "executionId": "f434d6eb-6434-40bb-b020-68ac47aeecc1",
+        "chatSessionId": "51da6dce-2374-4700-ad78-57db4714546e",
+        "timestamp": 1786329083459
+      },
+      {
+        "executionId": "f434d6eb-6434-40bb-b020-68ac47aeecc1",
+        "chatSessionId": "51da6dce-2374-4700-ad78-57db4714546e",
+        "timestamp": 1786329367383
+      },
+      {
+        "executionId": "f434d6eb-6434-40bb-b020-68ac47aeecc1",
+        "chatSessionId": "51da6dce-2374-4700-ad78-57db4714546e",
+        "timestamp": 1786329808138
+      }
+    ],
+    "2.1 Implement KMS encryption keys module": [
+      {
+        "executionId": "f434d6eb-6434-40bb-b020-68ac47aeecc1",
+        "chatSessionId": "51da6dce-2374-4700-ad78-57db4714546e",
+        "timestamp": 1786329083469
+      },
+      {
+        "executionId": "f434d6eb-6434-40bb-b020-68ac47aeecc1",
+        "chatSessionId": "51da6dce-2374-4700-ad78-57db4714546e",
+        "timestamp": 1786329816436
+      },
+      {
+        "executionId": "f434d6eb-6434-40bb-b020-68ac47aeecc1",
+        "chatSessionId": "51da6dce-2374-4700-ad78-57db4714546e",
+        "timestamp": 1786330209083
+      }
+    ],
+    "2.2 Implement IAM roles and policies module": [
+      {
+        "executionId": "f434d6eb-6434-40bb-b020-68ac47aeecc1",
+        "chatSessionId": "51da6dce-2374-4700-ad78-57db4714546e",
+        "timestamp": 1786329083475
+      },
+      {
+        "executionId": "f434d6eb-6434-40bb-b020-68ac47aeecc1",
+        "chatSessionId": "51da6dce-2374-4700-ad78-57db4714546e",
+        "timestamp": 1786329817153
+      },
+      {
+        "executionId": "f434d6eb-6434-40bb-b020-68ac47aeecc1",
+        "chatSessionId": "51da6dce-2374-4700-ad78-57db4714546e",
+        "timestamp": 1786330209763
+      }
+    ],
+    "2.3 Implement security detection and audit services": [
+      {
+        "executionId": "f434d6eb-6434-40bb-b020-68ac47aeecc1",
+        "chatSessionId": "51da6dce-2374-4700-ad78-57db4714546e",
+        "timestamp": 1786329083478
+      },
+      {
+        "executionId": "f434d6eb-6434-40bb-b020-68ac47aeecc1",
+        "chatSessionId": "51da6dce-2374-4700-ad78-57db4714546e",
+        "timestamp": 1786329817867
+      },
+      {
+        "executionId": "f434d6eb-6434-40bb-b020-68ac47aeecc1",
+        "chatSessionId": "51da6dce-2374-4700-ad78-57db4714546e",
+        "timestamp": 1786330210555
+      }
+    ],
+    "3.1 Implement S3 buckets with lifecycle and encryption": [
+      {
+        "executionId": "f434d6eb-6434-40bb-b020-68ac47aeecc1",
+        "chatSessionId": "51da6dce-2374-4700-ad78-57db4714546e",
+        "timestamp": 1786329083481
+      },
+      {
+        "executionId": "dc1779b0-df18-49fb-9e81-cbd5fe20ebe6",
+        "chatSessionId": "51da6dce-2374-4700-ad78-57db4714546e",
+        "timestamp": 1786330255953
+      },
+      {
+        "executionId": "dc1779b0-df18-49fb-9e81-cbd5fe20ebe6",
+        "chatSessionId": "51da6dce-2374-4700-ad78-57db4714546e",
+        "timestamp": 1786330886872
+      }
+    ],
+    "3.2 Implement cross-region replication for DR": [
+      {
+        "executionId": "f434d6eb-6434-40bb-b020-68ac47aeecc1",
+        "chatSessionId": "51da6dce-2374-4700-ad78-57db4714546e",
+        "timestamp": 1786329083484
+      },
+      {
+        "executionId": "dc1779b0-df18-49fb-9e81-cbd5fe20ebe6",
+        "chatSessionId": "51da6dce-2374-4700-ad78-57db4714546e",
+        "timestamp": 1786330256690
+      },
+      {
+        "executionId": "dc1779b0-df18-49fb-9e81-cbd5fe20ebe6",
+        "chatSessionId": "51da6dce-2374-4700-ad78-57db4714546e",
+        "timestamp": 1786330887730
+      }
+    ],
+    "3.3 Implement Glue Data Catalog and Lake Formation": [
+      {
+        "executionId": "f434d6eb-6434-40bb-b020-68ac47aeecc1",
+        "chatSessionId": "51da6dce-2374-4700-ad78-57db4714546e",
+        "timestamp": 1786329083488
+      },
+      {
+        "executionId": "dc1779b0-df18-49fb-9e81-cbd5fe20ebe6",
+        "chatSessionId": "51da6dce-2374-4700-ad78-57db4714546e",
+        "timestamp": 1786330257476
+      },
+      {
+        "executionId": "dc1779b0-df18-49fb-9e81-cbd5fe20ebe6",
+        "chatSessionId": "51da6dce-2374-4700-ad78-57db4714546e",
+        "timestamp": 1786330888510
+      }
+    ],
+    "4.1 Implement Kinesis Data Streams for market data ingestion": [
+      {
+        "executionId": "f434d6eb-6434-40bb-b020-68ac47aeecc1",
+        "chatSessionId": "51da6dce-2374-4700-ad78-57db4714546e",
+        "timestamp": 1786329083491
+      }
+    ],
+    "4.2 Implement EventBridge event bus and rules": [
+      {
+        "executionId": "f434d6eb-6434-40bb-b020-68ac47aeecc1",
+        "chatSessionId": "51da6dce-2374-4700-ad78-57db4714546e",
+        "timestamp": 1786329083494
+      }
+    ],
+    "4.3 Implement SQS queues and dead-letter queues": [
+      {
+        "executionId": "f434d6eb-6434-40bb-b020-68ac47aeecc1",
+        "chatSessionId": "51da6dce-2374-4700-ad78-57db4714546e",
+        "timestamp": 1786329083497
+      }
+    ],
+    "5. Checkpoint - Validate foundation infrastructure": [
+      {
+        "executionId": "f434d6eb-6434-40bb-b020-68ac47aeecc1",
+        "chatSessionId": "51da6dce-2374-4700-ad78-57db4714546e",
+        "timestamp": 1786329083499
+      }
+    ],
+    "6.1 Implement Lambda shared layer and common utilities": [
+      {
+        "executionId": "f434d6eb-6434-40bb-b020-68ac47aeecc1",
+        "chatSessionId": "51da6dce-2374-4700-ad78-57db4714546e",
+        "timestamp": 1786329083503
+      }
+    ],
+    "6.2 Implement Market Data Ingestion Lambda function": [
+      {
+        "executionId": "f434d6eb-6434-40bb-b020-68ac47aeecc1",
+        "chatSessionId": "51da6dce-2374-4700-ad78-57db4714546e",
+        "timestamp": 1786329083506
+      }
+    ],
+    "6.3 Implement Order Manager Lambda function": [
+      {
+        "executionId": "f434d6eb-6434-40bb-b020-68ac47aeecc1",
+        "chatSessionId": "51da6dce-2374-4700-ad78-57db4714546e",
+        "timestamp": 1786329083509
+      }
+    ],
+    "6.4 Implement Wallet Service Lambda function": [
+      {
+        "executionId": "f434d6eb-6434-40bb-b020-68ac47aeecc1",
+        "chatSessionId": "51da6dce-2374-4700-ad78-57db4714546e",
+        "timestamp": 1786329083513
+      }
+    ],
+    "6.5 Implement Advisory Agent Lambda function": [
+      {
+        "executionId": "f434d6eb-6434-40bb-b020-68ac47aeecc1",
+        "chatSessionId": "51da6dce-2374-4700-ad78-57db4714546e",
+        "timestamp": 1786329083516
+      }
+    ],
+    "6.6 Implement API Gateway and Cognito Terraform configuration": [
+      {
+        "executionId": "f434d6eb-6434-40bb-b020-68ac47aeecc1",
+        "chatSessionId": "51da6dce-2374-4700-ad78-57db4714546e",
+        "timestamp": 1786329083520
+      }
+    ],
+    "6.7 Implement Step Functions orchestrator": [
+      {
+        "executionId": "f434d6eb-6434-40bb-b020-68ac47aeecc1",
+        "chatSessionId": "51da6dce-2374-4700-ad78-57db4714546e",
+        "timestamp": 1786329083523
+      }
+    ],
+    "6.8 Implement Lambda function Terraform definitions": [
+      {
+        "executionId": "f434d6eb-6434-40bb-b020-68ac47aeecc1",
+        "chatSessionId": "51da6dce-2374-4700-ad78-57db4714546e",
+        "timestamp": 1786329083526
+      }
+    ],
+    "7. Checkpoint - Validate compute layer": [
+      {
+        "executionId": "f434d6eb-6434-40bb-b020-68ac47aeecc1",
+        "chatSessionId": "51da6dce-2374-4700-ad78-57db4714546e",
+        "timestamp": 1786329083529
+      }
+    ],
+    "8.1 Implement Bronze-to-Silver ETL job": [
+      {
+        "executionId": "f434d6eb-6434-40bb-b020-68ac47aeecc1",
+        "chatSessionId": "51da6dce-2374-4700-ad78-57db4714546e",
+        "timestamp": 1786329083532
+      }
+    ],
+    "8.2 Implement Silver-to-Gold ETL job": [
+      {
+        "executionId": "f434d6eb-6434-40bb-b020-68ac47aeecc1",
+        "chatSessionId": "51da6dce-2374-4700-ad78-57db4714546e",
+        "timestamp": 1786329083536
+      }
+    ],
+    "8.3 Implement data quality framework": [
+      {
+        "executionId": "f434d6eb-6434-40bb-b020-68ac47aeecc1",
+        "chatSessionId": "51da6dce-2374-4700-ad78-57db4714546e",
+        "timestamp": 1786329083540
+      }
+    ],
+    "8.4 Implement Glue job Terraform definitions": [
+      {
+        "executionId": "f434d6eb-6434-40bb-b020-68ac47aeecc1",
+        "chatSessionId": "51da6dce-2374-4700-ad78-57db4714546e",
+        "timestamp": 1786329083543
+      }
+    ],
+    "9.1 Implement DMS replication infrastructure": [
+      {
+        "executionId": "f434d6eb-6434-40bb-b020-68ac47aeecc1",
+        "chatSessionId": "51da6dce-2374-4700-ad78-57db4714546e",
+        "timestamp": 1786329083546
+      }
+    ],
+    "9.2 Implement CDC processing and schema evolution handling": [
+      {
+        "executionId": "f434d6eb-6434-40bb-b020-68ac47aeecc1",
+        "chatSessionId": "51da6dce-2374-4700-ad78-57db4714546e",
+        "timestamp": 1786329083549
+      }
+    ],
+    "10. Checkpoint - Validate data pipelines": [
+      {
+        "executionId": "f434d6eb-6434-40bb-b020-68ac47aeecc1",
+        "chatSessionId": "51da6dce-2374-4700-ad78-57db4714546e",
+        "timestamp": 1786329083552
+      }
+    ],
+    "11.1 Implement OpenSearch cluster and indexing": [
+      {
+        "executionId": "f434d6eb-6434-40bb-b020-68ac47aeecc1",
+        "chatSessionId": "51da6dce-2374-4700-ad78-57db4714546e",
+        "timestamp": 1786329083556
+      }
+    ],
+    "11.2 Implement Neptune graph database": [
+      {
+        "executionId": "f434d6eb-6434-40bb-b020-68ac47aeecc1",
+        "chatSessionId": "51da6dce-2374-4700-ad78-57db4714546e",
+        "timestamp": 1786329083559
+      }
+    ],
+    "11.3 Implement Athena query engine": [
+      {
+        "executionId": "f434d6eb-6434-40bb-b020-68ac47aeecc1",
+        "chatSessionId": "51da6dce-2374-4700-ad78-57db4714546e",
+        "timestamp": 1786329083563
+      }
+    ],
+    "12.1 Implement SageMaker infrastructure": [
+      {
+        "executionId": "f434d6eb-6434-40bb-b020-68ac47aeecc1",
+        "chatSessionId": "51da6dce-2374-4700-ad78-57db4714546e",
+        "timestamp": 1786329083566
+      }
+    ],
+    "12.2 Implement SageMaker training pipeline": [
+      {
+        "executionId": "f434d6eb-6434-40bb-b020-68ac47aeecc1",
+        "chatSessionId": "51da6dce-2374-4700-ad78-57db4714546e",
+        "timestamp": 1786329083570
+      }
+    ],
+    "12.3 Implement model governance and bias detection": [
+      {
+        "executionId": "f434d6eb-6434-40bb-b020-68ac47aeecc1",
+        "chatSessionId": "51da6dce-2374-4700-ad78-57db4714546e",
+        "timestamp": 1786329083573
+      }
+    ],
+    "13.1 Implement CloudWatch dashboards and alarms": [
+      {
+        "executionId": "f434d6eb-6434-40bb-b020-68ac47aeecc1",
+        "chatSessionId": "51da6dce-2374-4700-ad78-57db4714546e",
+        "timestamp": 1786329083576
+      }
+    ],
+    "13.2 Implement alerting and notification infrastructure": [
+      {
+        "executionId": "f434d6eb-6434-40bb-b020-68ac47aeecc1",
+        "chatSessionId": "51da6dce-2374-4700-ad78-57db4714546e",
+        "timestamp": 1786329083579
+      }
+    ],
+    "13.3 Implement X-Ray tracing and log management": [
+      {
+        "executionId": "f434d6eb-6434-40bb-b020-68ac47aeecc1",
+        "chatSessionId": "51da6dce-2374-4700-ad78-57db4714546e",
+        "timestamp": 1786329083583
+      }
+    ],
+    "13.4 Implement automated remediation runbooks": [
+      {
+        "executionId": "f434d6eb-6434-40bb-b020-68ac47aeecc1",
+        "chatSessionId": "51da6dce-2374-4700-ad78-57db4714546e",
+        "timestamp": 1786329083586
+      }
+    ],
+    "14. Checkpoint - Validate observability stack": [
+      {
+        "executionId": "f434d6eb-6434-40bb-b020-68ac47aeecc1",
+        "chatSessionId": "51da6dce-2374-4700-ad78-57db4714546e",
+        "timestamp": 1786329083590
+      }
+    ],
+    "15.1 Implement CodePipeline infrastructure": [
+      {
+        "executionId": "f434d6eb-6434-40bb-b020-68ac47aeecc1",
+        "chatSessionId": "51da6dce-2374-4700-ad78-57db4714546e",
+        "timestamp": 1786329083593
+      }
+    ],
+    "15.2 Implement blue-green deployment and drift detection": [
+      {
+        "executionId": "f434d6eb-6434-40bb-b020-68ac47aeecc1",
+        "chatSessionId": "51da6dce-2374-4700-ad78-57db4714546e",
+        "timestamp": 1786329083596
+      }
+    ],
+    "16.1 Implement cross-region DR infrastructure": [
+      {
+        "executionId": "f434d6eb-6434-40bb-b020-68ac47aeecc1",
+        "chatSessionId": "51da6dce-2374-4700-ad78-57db4714546e",
+        "timestamp": 1786329083600
+      }
+    ],
+    "16.2 Implement failover procedures and health checks": [
+      {
+        "executionId": "f434d6eb-6434-40bb-b020-68ac47aeecc1",
+        "chatSessionId": "51da6dce-2374-4700-ad78-57db4714546e",
+        "timestamp": 1786329083603
+      }
+    ],
+    "17.1 Implement cost optimization and reporting": [
+      {
+        "executionId": "f434d6eb-6434-40bb-b020-68ac47aeecc1",
+        "chatSessionId": "51da6dce-2374-4700-ad78-57db4714546e",
+        "timestamp": 1786329083607
+      }
+    ],
+    "18.1 Implement data masking and PII protection": [
+      {
+        "executionId": "f434d6eb-6434-40bb-b020-68ac47aeecc1",
+        "chatSessionId": "51da6dce-2374-4700-ad78-57db4714546e",
+        "timestamp": 1786329083610
+      }
+    ],
+    "18.2 Implement regulatory store and compliance automation": [
+      {
+        "executionId": "f434d6eb-6434-40bb-b020-68ac47aeecc1",
+        "chatSessionId": "51da6dce-2374-4700-ad78-57db4714546e",
+        "timestamp": 1786329083619
+      }
+    ],
+    "19. Checkpoint - Full platform integration validation": [
+      {
+        "executionId": "f434d6eb-6434-40bb-b020-68ac47aeecc1",
+        "chatSessionId": "51da6dce-2374-4700-ad78-57db4714546e",
+        "timestamp": 1786329083622
+      }
+    ],
+    "20.1 Implement Terraform module tests": [
+      {
+        "executionId": "f434d6eb-6434-40bb-b020-68ac47aeecc1",
+        "chatSessionId": "51da6dce-2374-4700-ad78-57db4714546e",
+        "timestamp": 1786329083626
+      }
+    ],
+    "20.2 Implement Lambda function unit tests": [
+      {
+        "executionId": "f434d6eb-6434-40bb-b020-68ac47aeecc1",
+        "chatSessionId": "51da6dce-2374-4700-ad78-57db4714546e",
+        "timestamp": 1786329083629
+      }
+    ],
+    "20.3 Implement ETL integration tests": [
+      {
+        "executionId": "f434d6eb-6434-40bb-b020-68ac47aeecc1",
+        "chatSessionId": "51da6dce-2374-4700-ad78-57db4714546e",
+        "timestamp": 1786329083632
+      }
+    ],
+    "20.4 Implement security and compliance tests": [
+      {
+        "executionId": "f434d6eb-6434-40bb-b020-68ac47aeecc1",
+        "chatSessionId": "51da6dce-2374-4700-ad78-57db4714546e",
+        "timestamp": 1786329083635
+      }
+    ],
+    "20.5 Implement monitoring and alarm validation tests": [
+      {
+        "executionId": "f434d6eb-6434-40bb-b020-68ac47aeecc1",
+        "chatSessionId": "51da6dce-2374-4700-ad78-57db4714546e",
+        "timestamp": 1786329083638
+      }
+    ],
+    "21. Final Checkpoint - Complete platform validation": [
+      {
+        "executionId": "f434d6eb-6434-40bb-b020-68ac47aeecc1",
+        "chatSessionId": "51da6dce-2374-4700-ad78-57db4714546e",
+        "timestamp": 1786329083641
+      }
+    ],
+    "1. Foundation: Terraform State, Organizations, and Networking": [
+      {
+        "executionId": "f434d6eb-6434-40bb-b020-68ac47aeecc1",
+        "chatSessionId": "51da6dce-2374-4700-ad78-57db4714546e",
+        "timestamp": 1786329808142
+      }
+    ],
+    "2. Security Baseline and IAM Foundation": [
+      {
+        "executionId": "f434d6eb-6434-40bb-b020-68ac47aeecc1",
+        "chatSessionId": "51da6dce-2374-4700-ad78-57db4714546e",
+        "timestamp": 1786330210558
+      }
+    ],
+    "3. Data Lake Infrastructure (S3, Glue Catalog, Lake Formation)": [
+      {
+        "executionId": "dc1779b0-df18-49fb-9e81-cbd5fe20ebe6",
+        "chatSessionId": "51da6dce-2374-4700-ad78-57db4714546e",
+        "timestamp": 1786330888519
+      }
+    ]
+  }
+}

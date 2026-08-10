@@ -1,0 +1,2496 @@
+# Design Document: VerticalBroker AWS Data Engineering Platform
+
+## Overview
+
+This document provides the **High-Level Design (HLD)** and **Low-Level Design (LLD)** for VerticalBroker's AWS Data Engineering Platform — a production-grade, FINRA-regulated data platform serving 200 million monthly users across three product lines (Full-Service, Self-Service, Automated-Service).
+
+### Design Goals
+
+| Goal | Target | Rationale |
+|------|--------|-----------|
+| Throughput | 100M datapoints/day (~1,157/sec avg, 12,000/sec burst) | Bloomberg B-Pipe + Thomson Reuters feeds |
+| Data Estate | 10 PB managed across Bronze/Silver/Gold layers | Historical trade data + regulatory retention |
+| Latency | <5s ingestion, <500ms API, <30s CDC | Real-time trading requirements |
+| Availability | 99.95% API, 99.9% batch pipelines | Financial services SLA |
+| Recovery | RTO 4h, RPO 1h | FINRA business continuity |
+| Compliance | FINRA 4511, SEC, SOC 2 Type II | Regulatory mandate |
+| Scale | 100+ AWS accounts, 200M monthly users | Enterprise growth |
+
+### Technology Stack
+
+- **Infrastructure**: Terraform 1.5+ with AWS Provider 5.x
+- **Application Code**: Python 3.12 (Lambda, Glue PySpark, SageMaker)
+- **Streaming**: Amazon Kinesis Data Streams
+- **Compute**: AWS Lambda with Powertools
+- **ETL**: AWS Glue with PySpark
+- **Orchestration**: AWS Step Functions
+- **Messaging**: Amazon EventBridge + SQS FIFO
+- **Storage**: S3 (Parquet/Iceberg), DynamoDB, Neptune, OpenSearch
+- **ML**: Amazon SageMaker (RL training, inference, model registry)
+- **Security**: IAM, KMS, Lake Formation, Cognito, GuardDuty
+- **Observability**: CloudWatch, X-Ray, CloudWatch Logs Insights
+
+
+
+---
+
+## Architecture
+
+### High-Level System Architecture (HLD)
+
+The platform is organized into **three architectural lanes** that represent distinct data flow patterns and scaling characteristics:
+
+```mermaid
+graph TB
+    subgraph "External Sources"
+        BB[Bloomberg B-Pipe]
+        TR[Thomson Reuters]
+        CS[Client Systems]
+        TA[Trading Applications]
+    end
+
+    subgraph "Lane 1: Transactional Trading"
+        APIGW[API Gateway<br/>REST + WebSocket]
+        COG[Cognito<br/>Identity Service]
+        OM[Order Manager<br/>Lambda]
+        WS[Wallet Service<br/>Lambda]
+        MDS[Market Data Service<br/>Lambda]
+        DDB[(DynamoDB<br/>Idempotency + State)]
+    end
+
+    subgraph "Lane 2: Event + Lakehouse"
+        KDS[Kinesis Data Streams<br/>12K rec/sec burst]
+        EB[EventBridge<br/>Event Bus]
+        SQS[SQS FIFO<br/>Trade Ordering]
+        SF[Step Functions<br/>Orchestrator]
+        GLUE[Glue PySpark<br/>ETL Engine]
+        S3B[(S3 Bronze<br/>Raw/Immutable)]
+        S3S[(S3 Silver<br/>Parquet/Validated)]
+        S3G[(S3 Gold<br/>Aggregated)]
+        CAT[Glue Data Catalog]
+        DMS[DMS CDC Pipeline]
+    end
+
+    subgraph "Lane 3: ML + Consumption"
+        SM[SageMaker<br/>RL Training]
+        SME[SageMaker Endpoint<br/>Real-time Inference]
+        MR[Model Registry<br/>Governance]
+        OS[OpenSearch<br/>Search + Analytics]
+        NEP[Neptune<br/>Graph Analytics]
+        ATH[Athena<br/>SQL Query Engine]
+        AA[Advisory Agent<br/>Lambda]
+    end
+
+    subgraph "Cross-Cutting"
+        KMS[KMS<br/>Encryption]
+        CW[CloudWatch + X-Ray<br/>Observability]
+        CT[CloudTrail<br/>Audit]
+        GD[GuardDuty<br/>Threat Detection]
+        LF[Lake Formation<br/>Data Governance]
+    end
+
+    BB --> KDS
+    TR --> KDS
+    CS --> APIGW
+    TA --> APIGW
+
+    APIGW --> COG
+    APIGW --> OM
+    APIGW --> WS
+    APIGW --> MDS
+    APIGW --> AA
+    OM --> DDB
+    WS --> DDB
+    OM --> EB
+    MDS --> EB
+
+    KDS --> S3B
+    EB --> SQS
+    EB --> SF
+    SF --> GLUE
+    GLUE --> S3B
+    GLUE --> S3S
+    GLUE --> S3G
+    S3B --> CAT
+    S3S --> CAT
+    S3G --> CAT
+    DMS --> S3B
+
+    S3G --> OS
+    S3G --> NEP
+    S3G --> ATH
+    S3G --> SM
+    SM --> MR
+    MR --> SME
+    SME --> AA
+```
+
+
+
+### Multi-Account Architecture
+
+```mermaid
+graph TB
+    subgraph "AWS Organizations"
+        MGMT[Management Account<br/>Organizations, SSO, Billing]
+        
+        subgraph "Security OU"
+            SEC[Security & Audit Account<br/>CloudTrail, GuardDuty, Config]
+        end
+        
+        subgraph "Shared Services OU"
+            SHARED[Shared Services Account<br/>Transit Gateway, DNS, ECR]
+        end
+        
+        subgraph "Data Lake OU"
+            DL_DEV[Data Lake Dev]
+            DL_STG[Data Lake Staging]
+            DL_PROD[Data Lake Production]
+        end
+        
+        subgraph "Compute OU"
+            CMP_DEV[Compute Dev]
+            CMP_STG[Compute Staging]
+            CMP_PROD[Compute Production]
+        end
+        
+        subgraph "DR OU"
+            DR[Disaster Recovery Account]
+        end
+    end
+
+    MGMT --> SEC
+    MGMT --> SHARED
+    SHARED --> DL_DEV
+    SHARED --> DL_STG
+    SHARED --> DL_PROD
+    SHARED --> CMP_DEV
+    SHARED --> CMP_STG
+    SHARED --> CMP_PROD
+    SHARED --> DR
+```
+
+### Network Architecture (LLD)
+
+```mermaid
+graph TB
+    subgraph "Transit Gateway"
+        TGW[AWS Transit Gateway<br/>Hub]
+    end
+
+    subgraph "Production VPC (10.0.0.0/16)"
+        subgraph "Private Subnets"
+            PS1[Data Subnet AZ-a<br/>10.0.1.0/24]
+            PS2[Data Subnet AZ-b<br/>10.0.2.0/24]
+            PS3[Data Subnet AZ-c<br/>10.0.3.0/24]
+            PS4[Compute Subnet AZ-a<br/>10.0.4.0/24]
+            PS5[Compute Subnet AZ-b<br/>10.0.5.0/24]
+            PS6[Compute Subnet AZ-c<br/>10.0.6.0/24]
+        end
+        subgraph "VPC Endpoints"
+            VPE1[S3 Gateway Endpoint]
+            VPE2[Glue Interface Endpoint]
+            VPE3[KMS Interface Endpoint]
+            VPE4[SQS Interface Endpoint]
+            VPE5[EventBridge Interface Endpoint]
+            VPE6[CloudWatch Interface Endpoint]
+        end
+    end
+
+    TGW --> PS1
+    TGW --> PS4
+    PS1 --> VPE1
+    PS4 --> VPE2
+```
+
+### Design Decisions
+
+| Decision | Choice | Rationale |
+|----------|--------|-----------|
+| Streaming | Kinesis over Kafka | Native AWS, auto-scaling shards, lower ops overhead for burst handling |
+| ETL | Glue PySpark over EMR | Serverless, auto-scaling DPUs, native Data Catalog integration |
+| Table Format | Parquet + Hive partitioning | Athena-native, proven at 10PB scale, cost-effective |
+| Graph DB | Neptune over Neo4j | Managed, IAM-integrated, Gremlin API for fraud detection |
+| ML | SageMaker RL over custom | Managed training, built-in model registry, A/B endpoint variants |
+| IaC | Terraform over CDK | Multi-cloud optionality, mature ecosystem, state management |
+| Messaging | EventBridge + SQS FIFO | Schema registry, exactly-once for trades, archive for debugging |
+| Auth | Cognito + IAM | Native JWT, RBAC, fine-grained resource policies |
+
+
+
+---
+
+## Components and Interfaces
+
+### Lane 1: Transactional Trading Microservices
+
+#### Market Data Ingestion Service (LLD)
+
+```mermaid
+sequenceDiagram
+    participant BB as Bloomberg B-Pipe
+    participant TR as Thomson Reuters
+    participant KDS as Kinesis Data Streams
+    participant LMD as Lambda: MarketDataProcessor
+    participant S3B as S3 Bronze Layer
+    participant CAT as Glue Data Catalog
+    participant EB as EventBridge
+    participant DLQ as SQS Dead-Letter Queue
+
+    BB->>KDS: Push market data records
+    TR->>KDS: Push market data records
+    KDS->>LMD: Batch invoke (100 records/batch)
+    LMD->>LMD: Validate schema + enrich metadata
+    alt Valid Record
+        LMD->>S3B: PutObject (Parquet micro-batch)
+        LMD->>CAT: UpdatePartition
+        LMD->>EB: Emit data.ingested event
+    else Malformed Record
+        LMD->>DLQ: SendMessage (dead-letter)
+        LMD->>EB: Emit pipeline.error event
+    end
+```
+
+**Python Lambda Structure:**
+
+```python
+# src/services/market_data/handler.py
+from aws_lambda_powertools import Logger, Tracer, Metrics
+from aws_lambda_powertools.utilities.idempotency import (
+    DynamoDBPersistenceLayer, idempotent_function
+)
+from aws_lambda_powertools.utilities.batch import (
+    BatchProcessor, EventType, batch_processor
+)
+
+logger = Logger(service="market-data-ingestion")
+tracer = Tracer(service="market-data-ingestion")
+metrics = Metrics(namespace="VerticalBroker/MarketData")
+processor = BatchProcessor(event_type=EventType.KinesisDataStreamEvent)
+
+class MarketDataRecord:
+    """Validated market data record with metadata enrichment."""
+    source_id: str          # "bloomberg" | "thomson-reuters"
+    instrument_id: str      # ISIN/CUSIP identifier
+    timestamp: datetime     # Source timestamp (UTC)
+    ingestion_ts: datetime  # Platform ingestion timestamp
+    schema_version: str     # e.g., "v2.3.1"
+    partition_key: str      # Derived: {source}/{instrument_type}/{date}
+    payload: dict           # Raw market data fields
+
+class MarketDataProcessor:
+    """Processes Kinesis batches with validation and routing."""
+
+    def __init__(self):
+        self.s3_client = boto3.client('s3')
+        self.catalog_client = boto3.client('glue')
+        self.eventbridge_client = boto3.client('events')
+        self.schema_registry = SchemaRegistry()
+
+    @tracer.capture_method
+    def process_record(self, record: dict) -> MarketDataRecord:
+        """Validate, enrich, and route a single market data record."""
+        ...
+
+    @tracer.capture_method
+    def write_micro_batch(self, records: list[MarketDataRecord]) -> str:
+        """Write validated records as Parquet micro-batch to S3 Bronze."""
+        ...
+
+    @tracer.capture_method
+    def register_partition(self, s3_path: str, partition_values: dict):
+        """Register new partition in Glue Data Catalog."""
+        ...
+
+@logger.inject_lambda_context
+@tracer.capture_lambda_handler
+@metrics.log_metrics(capture_cold_start_metric=True)
+def lambda_handler(event, context):
+    """Kinesis stream processor entry point."""
+    batch = BatchProcessor(event_type=EventType.KinesisDataStreamEvent)
+    with batch(records=event["Records"], handler=record_handler):
+        processed = batch.process()
+    return batch.response()
+```
+
+**Kinesis Shard Calculation:**
+
+| Parameter | Value | Calculation |
+|-----------|-------|-------------|
+| Average throughput | 1,157 rec/sec | 100M / 86,400 |
+| Burst throughput | 12,000 rec/sec | 10x average |
+| Avg record size | 1 KB | Market data payload + metadata |
+| Write capacity/shard | 1,000 rec/sec or 1 MB/sec | AWS limit |
+| Required shards (burst) | 12 shards | 12,000 / 1,000 |
+| Provisioned shards | 16 shards | 12 + 33% headroom |
+| On-demand mode | Enabled | Auto-scales beyond 16 for spikes |
+
+
+
+#### Order Manager Service (LLD)
+
+```python
+# src/services/order_manager/handler.py
+from aws_lambda_powertools import Logger, Tracer, Metrics
+from aws_lambda_powertools.utilities.idempotency import (
+    DynamoDBPersistenceLayer, idempotent
+)
+from aws_lambda_powertools.event_handler import APIGatewayHttpResolver
+
+logger = Logger(service="order-manager")
+tracer = Tracer(service="order-manager")
+metrics = Metrics(namespace="VerticalBroker/Orders")
+app = APIGatewayHttpResolver()
+
+persistence_layer = DynamoDBPersistenceLayer(table_name="IdempotencyStore")
+
+class OrderRequest:
+    """Incoming order request from trading applications."""
+    client_id: str
+    account_id: str
+    instrument_id: str        # ISIN/CUSIP
+    order_type: str           # "MARKET" | "LIMIT" | "STOP" | "STOP_LIMIT"
+    side: str                 # "BUY" | "SELL"
+    quantity: Decimal
+    limit_price: Optional[Decimal]
+    stop_price: Optional[Decimal]
+    time_in_force: str        # "DAY" | "GTC" | "IOC" | "FOK"
+    idempotency_key: str      # Client-provided dedup key
+
+class OrderResponse:
+    """Order execution response."""
+    order_id: str             # Platform-generated UUID
+    status: str               # "ACCEPTED" | "REJECTED" | "PENDING"
+    executed_price: Optional[Decimal]
+    executed_quantity: Optional[Decimal]
+    rejection_reason: Optional[str]
+    timestamp: datetime
+
+class OrderManager:
+    """Handles order lifecycle: validation, execution, settlement."""
+
+    @idempotent(persistence_store=persistence_layer)
+    @tracer.capture_method
+    def submit_order(self, request: OrderRequest) -> OrderResponse:
+        """Submit a new order with idempotency guarantee."""
+        ...
+
+    @tracer.capture_method
+    def validate_order(self, request: OrderRequest) -> ValidationResult:
+        """Pre-trade validation: margin, position limits, market hours."""
+        ...
+
+    @tracer.capture_method
+    def emit_trade_event(self, order: OrderResponse):
+        """Publish trade.executed event to EventBridge."""
+        ...
+
+@app.post("/v1/orders")
+@tracer.capture_method
+def create_order():
+    """POST /v1/orders - Submit new order."""
+    ...
+
+@app.get("/v1/orders/<order_id>")
+@tracer.capture_method
+def get_order(order_id: str):
+    """GET /v1/orders/{order_id} - Retrieve order status."""
+    ...
+
+@logger.inject_lambda_context
+@tracer.capture_lambda_handler
+@metrics.log_metrics
+def lambda_handler(event, context):
+    return app.resolve(event, context)
+```
+
+#### Wallet Service (LLD)
+
+```python
+# src/services/wallet/handler.py
+class WalletService:
+    """Manages client account balances and positions."""
+
+    def get_portfolio(self, client_id: str, account_id: str) -> Portfolio:
+        """Retrieve current portfolio positions and cash balance."""
+        ...
+
+    def update_position(self, trade_event: TradeEvent) -> PositionUpdate:
+        """Update position based on executed trade (event-driven)."""
+        ...
+
+    def check_margin(self, client_id: str, order: OrderRequest) -> MarginResult:
+        """Real-time margin check before order acceptance."""
+        ...
+
+class Portfolio:
+    client_id: str
+    account_id: str
+    cash_balance: Decimal
+    positions: list[Position]
+    margin_available: Decimal
+    total_value: Decimal
+    last_updated: datetime
+
+class Position:
+    instrument_id: str
+    quantity: Decimal
+    avg_cost_basis: Decimal
+    current_price: Decimal
+    unrealized_pnl: Decimal
+    market_value: Decimal
+```
+
+#### Advisory Agent Service (LLD)
+
+```python
+# src/services/advisory_agent/handler.py
+class CustomerProfile:
+    """Input features for RL-based advisory model."""
+    age: int
+    tax_filing_status: str         # "SINGLE" | "MARRIED_JOINT" | "MARRIED_SEPARATE" | "HEAD_OF_HOUSEHOLD"
+    annual_income: Decimal
+    total_debt: Decimal
+    household_income: Decimal
+    risk_profile: str              # "CONSERVATIVE" | "MODERATE" | "AGGRESSIVE" | "VERY_AGGRESSIVE"
+    investment_strategies: list[str]  # ["GROWTH", "VALUE", "INCOME", "INDEX"]
+    investment_horizon_years: int
+    existing_allocations: dict[str, Decimal]
+
+class AdvisoryRecommendation:
+    """Output from RL advisory model."""
+    recommendation_id: str
+    model_version: str
+    allocations: dict[str, Decimal]   # asset_class -> percentage
+    confidence_score: float            # 0.0 - 1.0
+    explanation: str
+    risk_metrics: RiskMetrics
+    requires_human_review: bool        # True if confidence < 0.7
+    uncertainty_factors: list[str]
+
+class AdvisoryAgentService:
+    """Orchestrates RL model inference with governance."""
+
+    def __init__(self):
+        self.sagemaker_runtime = boto3.client('sagemaker-runtime')
+        self.endpoint_name = os.environ['SAGEMAKER_ENDPOINT']
+        self.regulatory_store = RegulatoryStore()
+
+    @tracer.capture_method
+    def get_recommendation(self, profile: CustomerProfile) -> AdvisoryRecommendation:
+        """Invoke SageMaker endpoint and apply governance rules."""
+        response = self.sagemaker_runtime.invoke_endpoint(
+            EndpointName=self.endpoint_name,
+            ContentType='application/json',
+            Body=json.dumps(profile.to_features())
+        )
+        recommendation = self._parse_response(response)
+        
+        # Governance: flag low-confidence recommendations
+        if recommendation.confidence_score < 0.7:
+            recommendation.requires_human_review = True
+        
+        # FINRA compliance: log all recommendations
+        self.regulatory_store.log_recommendation(
+            input_features=profile,
+            model_version=recommendation.model_version,
+            output=recommendation
+        )
+        return recommendation
+```
+
+
+
+### Lane 2: Event + Lakehouse Architecture
+
+#### Event-Driven Architecture (LLD)
+
+```mermaid
+graph LR
+    subgraph "Event Producers"
+        P1[Market Data Service]
+        P2[Order Manager]
+        P3[ETL Engine]
+        P4[Advisory Agent]
+        P5[CDC Pipeline]
+    end
+
+    subgraph "Amazon EventBridge"
+        EB[Event Bus: verticalbroker-platform]
+        SR[Schema Registry]
+        AR[Archive: unmatched-events]
+        R1[Rule: data.ingested → ETL]
+        R2[Rule: trade.executed → Wallet]
+        R3[Rule: pipeline.failed → Monitoring]
+        R4[Rule: compliance.alert → Security]
+        R5[Rule: advisory.generated → Audit]
+    end
+
+    subgraph "Event Consumers"
+        C1[Step Functions Orchestrator]
+        C2[SQS FIFO: trade-processing]
+        C3[Lambda: Notification]
+        C4[CloudWatch: Metrics]
+        C5[SNS: PagerDuty]
+    end
+
+    P1 --> EB
+    P2 --> EB
+    P3 --> EB
+    P4 --> EB
+    P5 --> EB
+    EB --> SR
+    EB --> R1 --> C1
+    EB --> R2 --> C2
+    EB --> R3 --> C4
+    EB --> R4 --> C5
+    EB --> R5 --> C3
+    EB -.-> AR
+```
+
+**EventBridge Event Schemas (LLD):**
+
+```json
+{
+  "data.ingested": {
+    "source": "verticalbroker.market-data",
+    "detail-type": "MarketDataIngested",
+    "detail": {
+      "source_id": "string",
+      "partition_path": "string",
+      "record_count": "integer",
+      "ingestion_timestamp": "string (ISO-8601)",
+      "schema_version": "string",
+      "size_bytes": "integer"
+    }
+  },
+  "trade.executed": {
+    "source": "verticalbroker.order-manager",
+    "detail-type": "TradeExecuted",
+    "detail": {
+      "order_id": "string (UUID)",
+      "client_id": "string",
+      "instrument_id": "string",
+      "side": "string (BUY|SELL)",
+      "quantity": "number",
+      "executed_price": "number",
+      "execution_timestamp": "string (ISO-8601)",
+      "venue": "string"
+    }
+  },
+  "pipeline.failed": {
+    "source": "verticalbroker.etl-engine",
+    "detail-type": "PipelineExecutionFailed",
+    "detail": {
+      "job_id": "string",
+      "pipeline_stage": "string (bronze-to-silver|silver-to-gold)",
+      "error_type": "string",
+      "error_message": "string",
+      "retry_count": "integer",
+      "affected_partitions": ["string"],
+      "failure_timestamp": "string (ISO-8601)"
+    }
+  },
+  "compliance.alert": {
+    "source": "verticalbroker.security",
+    "detail-type": "ComplianceAlert",
+    "detail": {
+      "alert_id": "string (UUID)",
+      "severity": "string (HIGH|MEDIUM|LOW)",
+      "alert_type": "string",
+      "source_account": "string",
+      "resource_arn": "string",
+      "description": "string",
+      "detection_timestamp": "string (ISO-8601)"
+    }
+  },
+  "advisory.generated": {
+    "source": "verticalbroker.advisory-agent",
+    "detail-type": "AdvisoryGenerated",
+    "detail": {
+      "recommendation_id": "string (UUID)",
+      "client_id": "string",
+      "model_version": "string",
+      "confidence_score": "number",
+      "requires_human_review": "boolean",
+      "timestamp": "string (ISO-8601)"
+    }
+  }
+}
+```
+
+**SQS Queue Configurations (LLD):**
+
+| Queue | Type | Visibility Timeout | Retention | Max Receive | DLQ |
+|-------|------|-------------------|-----------|-------------|-----|
+| trade-processing.fifo | FIFO | 30s | 14 days | 5 | trade-processing-dlq.fifo |
+| market-data-buffer | Standard | 60s | 14 days | 3 | market-data-dlq |
+| etl-trigger | Standard | 300s | 4 days | 3 | etl-trigger-dlq |
+| advisory-requests | Standard | 30s | 4 days | 5 | advisory-dlq |
+| compliance-events | FIFO | 60s | 14 days | 5 | compliance-dlq.fifo |
+
+
+
+#### Step Functions Orchestrator (LLD)
+
+```mermaid
+stateDiagram-v2
+    [*] --> ValidateInput
+    ValidateInput --> CheckPartition: Valid
+    ValidateInput --> EmitError: Invalid
+    
+    CheckPartition --> TriggerBronzeToSilver: New Partition
+    CheckPartition --> SkipProcessing: Already Processed
+    
+    TriggerBronzeToSilver --> WaitForGlueJob
+    WaitForGlueJob --> CheckJobStatus
+    
+    CheckJobStatus --> TriggerSilverToGold: Success
+    CheckJobStatus --> RetryJob: Failed (retries < 3)
+    CheckJobStatus --> EmitFailure: Failed (retries >= 3)
+    
+    RetryJob --> WaitForGlueJob
+    
+    TriggerSilverToGold --> WaitForGoldJob
+    WaitForGoldJob --> CheckGoldStatus
+    
+    CheckGoldStatus --> TriggerIndexing: Success
+    CheckGoldStatus --> RetryGoldJob: Failed (retries < 3)
+    CheckGoldStatus --> EmitFailure: Failed (retries >= 3)
+    
+    RetryGoldJob --> WaitForGoldJob
+    
+    TriggerIndexing --> UpdateOpenSearch
+    UpdateOpenSearch --> UpdateNeptune
+    UpdateNeptune --> EmitSuccess
+    
+    EmitSuccess --> [*]
+    EmitFailure --> [*]
+    EmitError --> [*]
+    SkipProcessing --> [*]
+```
+
+**State Machine Definition (LLD):**
+
+```python
+# src/orchestration/pipeline_state_machine.py
+PIPELINE_STATE_MACHINE = {
+    "Comment": "VerticalBroker ETL Pipeline Orchestrator",
+    "StartAt": "ValidateInput",
+    "States": {
+        "ValidateInput": {
+            "Type": "Task",
+            "Resource": "arn:aws:lambda:{region}:{account}:function:validate-pipeline-input",
+            "Next": "CheckPartition",
+            "Catch": [{"ErrorEquals": ["ValidationError"], "Next": "EmitError"}]
+        },
+        "TriggerBronzeToSilver": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::glue:startJobRun.sync",
+            "Parameters": {
+                "JobName": "bronze-to-silver-etl",
+                "Arguments": {
+                    "--source_partition.$": "$.partition_path",
+                    "--job_id.$": "$$.Execution.Id"
+                }
+            },
+            "Retry": [{"ErrorEquals": ["Glue.AWSGlueException"], 
+                       "IntervalSeconds": 60, "MaxAttempts": 3, "BackoffRate": 2.0}],
+            "Catch": [{"ErrorEquals": ["States.ALL"], "Next": "EmitFailure"}],
+            "Next": "TriggerSilverToGold"
+        },
+        "TriggerSilverToGold": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::glue:startJobRun.sync",
+            "Parameters": {
+                "JobName": "silver-to-gold-etl",
+                "Arguments": {
+                    "--source_partition.$": "$.silver_output_path",
+                    "--job_id.$": "$$.Execution.Id"
+                }
+            },
+            "Retry": [{"ErrorEquals": ["Glue.AWSGlueException"],
+                       "IntervalSeconds": 60, "MaxAttempts": 3, "BackoffRate": 2.0}],
+            "Catch": [{"ErrorEquals": ["States.ALL"], "Next": "EmitFailure"}],
+            "Next": "TriggerIndexing"
+        },
+        "TriggerIndexing": {
+            "Type": "Parallel",
+            "Branches": [
+                {"StartAt": "UpdateOpenSearch", "States": {"UpdateOpenSearch": {"Type": "Task", "Resource": "...", "End": True}}},
+                {"StartAt": "UpdateNeptune", "States": {"UpdateNeptune": {"Type": "Task", "Resource": "...", "End": True}}}
+            ],
+            "Next": "EmitSuccess"
+        }
+    }
+}
+```
+
+
+
+#### ETL Pipeline Architecture (LLD)
+
+```mermaid
+graph LR
+    subgraph "Bronze → Silver"
+        B1[S3 Bronze<br/>Raw JSON/CSV]
+        G1[Glue PySpark Job<br/>bronze_to_silver.py]
+        DQ1[Data Quality<br/>Schema + Null + Range]
+        B1 --> G1 --> DQ1
+        DQ1 -->|Pass| S1[S3 Silver<br/>Parquet/Snappy]
+        DQ1 -->|Fail| ERR1[Error Partition<br/>s3://.../_errors/]
+    end
+
+    subgraph "Silver → Gold"
+        S1 --> G2[Glue PySpark Job<br/>silver_to_gold.py]
+        G2 --> AGG[Aggregation Engine]
+        AGG --> S2[S3 Gold<br/>Parquet/Optimized]
+    end
+
+    subgraph "Gold Datasets"
+        S2 --> D1[daily_trade_summaries]
+        S2 --> D2[client_portfolio_snapshots]
+        S2 --> D3[instrument_performance]
+        S2 --> D4[risk_exposure_aggregates]
+    end
+```
+
+**PySpark ETL Job Structure (LLD):**
+
+```python
+# src/etl/bronze_to_silver.py
+"""Bronze to Silver ETL: Cleanse, validate, deduplicate, conform."""
+import sys
+from awsglue.transforms import *
+from awsglue.utils import getResolvedOptions
+from awsglue.context import GlueContext
+from awsglue.job import Job
+from awsglue.dynamicframe import DynamicFrame
+from pyspark.sql import SparkSession, functions as F
+from pyspark.sql.types import StructType
+
+class BronzeToSilverETL:
+    """Transforms raw Bronze data into validated Silver layer."""
+
+    def __init__(self, glue_context: GlueContext, job_args: dict):
+        self.glue_context = glue_context
+        self.spark = glue_context.spark_session
+        self.source_partition = job_args['source_partition']
+        self.job_id = job_args['job_id']
+        self.metrics = PipelineMetrics()
+
+    def extract(self) -> DynamicFrame:
+        """Read raw data from Bronze S3 partition."""
+        return self.glue_context.create_dynamic_frame.from_catalog(
+            database="verticalbroker_bronze",
+            table_name="market_data_raw",
+            push_down_predicate=f"partition_path = '{self.source_partition}'"
+        )
+
+    def validate_schema(self, df: DynamicFrame) -> tuple[DynamicFrame, DynamicFrame]:
+        """Validate against Glue Data Catalog schema. Returns (valid, rejected)."""
+        ...
+
+    def deduplicate(self, df: DynamicFrame) -> DynamicFrame:
+        """Deduplicate on composite key: instrument_id + timestamp + source."""
+        spark_df = df.toDF()
+        deduped = spark_df.dropDuplicates(['instrument_id', 'timestamp', 'source_id'])
+        self.metrics.record_dedup_count(spark_df.count() - deduped.count())
+        return DynamicFrame.fromDF(deduped, self.glue_context, "deduped")
+
+    def apply_data_quality(self, df: DynamicFrame) -> tuple[DynamicFrame, DynamicFrame]:
+        """Apply data quality rules: null checks, range validation, freshness."""
+        ...
+
+    def write_silver(self, df: DynamicFrame):
+        """Write to Silver layer as Parquet with Snappy compression."""
+        self.glue_context.write_dynamic_frame.from_options(
+            frame=df,
+            connection_type="s3",
+            format="parquet",
+            connection_options={
+                "path": f"s3://vb-silver-{self.env}/market_data/",
+                "partitionKeys": ["instrument_type", "trade_date"]
+            },
+            format_options={"compression": "snappy"}
+        )
+
+    def write_lineage(self, input_count: int, output_count: int, rejected_count: int):
+        """Record data lineage metadata for audit trail."""
+        ...
+
+    def run(self):
+        """Execute full Bronze → Silver pipeline."""
+        raw = self.extract()
+        valid, schema_rejected = self.validate_schema(raw)
+        deduped = self.deduplicate(valid)
+        quality_passed, quality_rejected = self.apply_data_quality(deduped)
+        self.write_silver(quality_passed)
+        self.write_lineage(raw.count(), quality_passed.count(), 
+                          schema_rejected.count() + quality_rejected.count())
+
+
+# src/etl/silver_to_gold.py
+"""Silver to Gold ETL: Aggregate, enrich, optimize for consumption."""
+class SilverToGoldETL:
+    """Produces business-level Gold aggregates from Silver data."""
+
+    def compute_daily_trade_summaries(self, silver_df) -> DataFrame:
+        """Aggregate trades by instrument, date: volume, VWAP, high, low, close."""
+        return silver_df.groupBy("instrument_id", "trade_date").agg(
+            F.sum("quantity").alias("total_volume"),
+            F.sum(F.col("price") * F.col("quantity")).alias("turnover"),
+            F.max("price").alias("high"),
+            F.min("price").alias("low"),
+            F.last("price").alias("close"),
+            F.count("*").alias("trade_count")
+        ).withColumn("vwap", F.col("turnover") / F.col("total_volume"))
+
+    def compute_client_portfolio_snapshots(self, silver_df) -> DataFrame:
+        """Point-in-time portfolio state per client."""
+        ...
+
+    def compute_instrument_performance(self, silver_df) -> DataFrame:
+        """Rolling performance metrics per instrument."""
+        ...
+
+    def compute_risk_exposure(self, silver_df) -> DataFrame:
+        """Risk exposure aggregates by client, sector, geography."""
+        ...
+
+    def validate_referential_integrity(self, gold_dfs: dict[str, DataFrame]):
+        """Cross-dataset FK validation against Glue Data Catalog."""
+        ...
+```
+
+**Glue DPU Auto-Scaling Configuration:**
+
+| Parameter | Value | Rationale |
+|-----------|-------|-----------|
+| Worker Type | G.2X (8 vCPU, 32 GB) | Optimized for Parquet/Snappy workloads |
+| Min Workers | 10 | Baseline for 200GB daily |
+| Max Workers | 100 DPU | Handle 500GB burst days |
+| Auto-scaling | Enabled | Scale based on executor memory pressure |
+| Job Timeout | 60 min | SLA: Bronze→Silver within 1 hour |
+| Retry Attempts | 3 | Before escalation to monitoring |
+| Job Bookmark | Enabled | Incremental processing, avoid reprocessing |
+
+
+
+#### API Gateway Design (LLD)
+
+```mermaid
+graph TB
+    subgraph "API Gateway (HTTP API)"
+        AUTH[Cognito JWT Authorizer]
+        RL[Rate Limiting<br/>10K auth / 100 unauth per sec]
+        VAL[Request Validation<br/>OpenAPI 3.0 Schema]
+        
+        subgraph "REST Endpoints"
+            V1[/v1/*]
+            V2[/v2/*]
+        end
+        
+        subgraph "WebSocket Endpoints"
+            WS[wss://market-data<br/>2h connection limit]
+        end
+    end
+
+    subgraph "Route Mapping"
+        V1 --> |/v1/orders| OM_FN[Lambda: OrderManager]
+        V1 --> |/v1/portfolio| WS_FN[Lambda: WalletService]
+        V1 --> |/v1/advisory| AA_FN[Lambda: AdvisoryAgent]
+        V1 --> |/v1/search| OS_FN[Lambda: SearchProxy]
+        V1 --> |/v1/graph| NP_FN[Lambda: GraphQuery]
+        V1 --> |/v1/query| ATH_FN[Lambda: AthenaQuery]
+        WS --> |$connect| WS_CONN[Lambda: WSConnect]
+        WS --> |$disconnect| WS_DISC[Lambda: WSDisconnect]
+        WS --> |subscribe| WS_SUB[Lambda: WSSubscribe]
+    end
+
+    AUTH --> RL --> VAL --> V1
+    AUTH --> RL --> VAL --> V2
+    AUTH --> WS
+```
+
+**API Endpoint Specifications:**
+
+| Endpoint | Method | Auth | Rate Limit | Timeout | Description |
+|----------|--------|------|------------|---------|-------------|
+| `/v1/orders` | POST | JWT | 10K/sec | 30s | Submit trade order |
+| `/v1/orders/{id}` | GET | JWT | 10K/sec | 30s | Get order status |
+| `/v1/portfolio/{client_id}` | GET | JWT | 10K/sec | 30s | Get portfolio snapshot |
+| `/v1/advisory` | POST | JWT | 5K/sec | 30s | Get RL recommendation |
+| `/v1/search` | POST | JWT | 10K/sec | 30s | Full-text search |
+| `/v1/graph/query` | POST | JWT | 1K/sec | 30s | Graph traversal query |
+| `/v1/query/execute` | POST | JWT | 1K/sec | 30s | Execute Athena query |
+| `/v1/query/{id}/results` | GET | JWT | 10K/sec | 30s | Get query results |
+| `wss://market-data` | WebSocket | JWT | 5K conn | 2h max | Real-time market stream |
+
+**API Versioning Strategy:**
+- Path-based routing: `/v1/`, `/v2/`
+- Deprecation period: 6 months with `Sunset` header
+- Breaking changes increment major version
+- Non-breaking additions within same version
+
+### Lane 3: ML + Consumption Architecture
+
+#### SageMaker RL Training Pipeline (LLD)
+
+```mermaid
+graph LR
+    subgraph "Training Pipeline"
+        DATA[Gold Layer<br/>Historical Outcomes]
+        PREP[Feature Engineering<br/>Processing Job]
+        TRAIN[RL Training<br/>PPO/A3C Algorithm]
+        EVAL[Model Evaluation<br/>Metrics + Bias]
+        REG[Model Registry<br/>Version + Metadata]
+    end
+
+    subgraph "Deployment"
+        REG --> APPROVE{Governance<br/>Review}
+        APPROVE -->|Approved| EP_A[Endpoint Variant A<br/>Production]
+        APPROVE -->|A/B Test| EP_B[Endpoint Variant B<br/>Canary]
+    end
+
+    subgraph "Inference"
+        API[API Gateway] --> INVOKE[SageMaker Runtime<br/>InvokeEndpoint]
+        INVOKE --> EP_A
+        INVOKE --> EP_B
+        EP_A --> RESP[Recommendation<br/>< 500ms P99]
+        EP_B --> RESP
+    end
+
+    DATA --> PREP --> TRAIN --> EVAL --> REG
+```
+
+**SageMaker Pipeline Structure (LLD):**
+
+```python
+# src/ml/training_pipeline.py
+"""SageMaker RL Training Pipeline for Advisory Agent."""
+import sagemaker
+from sagemaker.rl import RLEstimator
+from sagemaker.model_monitor import ModelMonitor
+from sagemaker.workflow.pipeline import Pipeline
+from sagemaker.workflow.steps import TrainingStep, ProcessingStep, ModelStep
+
+class AdvisoryModelPipeline:
+    """End-to-end ML pipeline: feature eng → train → evaluate → register."""
+
+    def __init__(self, role: str, region: str):
+        self.session = sagemaker.Session()
+        self.role = role
+        self.model_package_group = "verticalbroker-advisory-models"
+
+    def create_feature_engineering_step(self) -> ProcessingStep:
+        """Extract features from Gold layer historical data."""
+        ...
+
+    def create_training_step(self) -> TrainingStep:
+        """Train RL model using PPO algorithm."""
+        estimator = RLEstimator(
+            entry_point="train_advisory.py",
+            source_dir="src/ml/rl_training/",
+            role=self.role,
+            framework="ray",
+            framework_version="2.6.0",
+            instance_type="ml.p3.2xlarge",
+            instance_count=1,
+            hyperparameters={
+                "algorithm": "PPO",
+                "learning_rate": 0.0003,
+                "gamma": 0.99,
+                "num_episodes": 10000,
+                "batch_size": 256
+            }
+        )
+        return TrainingStep(name="TrainAdvisoryModel", estimator=estimator)
+
+    def create_evaluation_step(self) -> ProcessingStep:
+        """Evaluate model: performance, bias detection, fairness metrics."""
+        ...
+
+    def create_registration_step(self) -> ModelStep:
+        """Register model with governance metadata."""
+        ...
+
+    def create_pipeline(self) -> Pipeline:
+        """Assemble full training pipeline."""
+        return Pipeline(
+            name="verticalbroker-advisory-training",
+            steps=[
+                self.create_feature_engineering_step(),
+                self.create_training_step(),
+                self.create_evaluation_step(),
+                self.create_registration_step()
+            ]
+        )
+
+# src/ml/model_governance.py
+class ModelGovernance:
+    """Pre-deployment governance checks for FINRA compliance."""
+
+    def check_bias(self, model_artifact: str, test_data: str) -> BiasReport:
+        """Detect bias across demographic groups (age, income, filing status)."""
+        ...
+
+    def generate_explainability(self, model_artifact: str) -> ExplainabilityReport:
+        """SHAP-based feature importance for regulatory transparency."""
+        ...
+
+    def validate_fairness_metrics(self, predictions: DataFrame) -> FairnessResult:
+        """Ensure equitable recommendations across protected classes."""
+        ...
+
+    def approve_for_deployment(self, model_version: str, reports: dict) -> bool:
+        """Final governance gate before production deployment."""
+        ...
+```
+
+
+
+#### Analytics Services (LLD)
+
+**OpenSearch Index Mappings:**
+
+```json
+{
+  "trade_records": {
+    "settings": {
+      "number_of_shards": 12,
+      "number_of_replicas": 2,
+      "codec": "best_compression",
+      "refresh_interval": "30s"
+    },
+    "mappings": {
+      "properties": {
+        "trade_id": {"type": "keyword"},
+        "client_id": {"type": "keyword"},
+        "instrument_id": {"type": "keyword"},
+        "instrument_name": {"type": "text", "analyzer": "standard"},
+        "side": {"type": "keyword"},
+        "quantity": {"type": "double"},
+        "price": {"type": "double"},
+        "total_value": {"type": "double"},
+        "execution_timestamp": {"type": "date", "format": "strict_date_optional_time"},
+        "settlement_date": {"type": "date"},
+        "venue": {"type": "keyword"},
+        "account_type": {"type": "keyword"},
+        "@timestamp": {"type": "date"}
+      }
+    }
+  },
+  "client_profiles": {
+    "settings": {
+      "number_of_shards": 6,
+      "number_of_replicas": 2
+    },
+    "mappings": {
+      "properties": {
+        "client_id": {"type": "keyword"},
+        "name": {"type": "text", "fields": {"keyword": {"type": "keyword"}}},
+        "account_ids": {"type": "keyword"},
+        "risk_profile": {"type": "keyword"},
+        "advisor_id": {"type": "keyword"},
+        "account_type": {"type": "keyword"},
+        "kyc_status": {"type": "keyword"},
+        "created_date": {"type": "date"},
+        "last_activity": {"type": "date"}
+      }
+    }
+  }
+}
+```
+
+**OpenSearch Index State Management Policy:**
+
+| Phase | Duration | Storage | Action |
+|-------|----------|---------|--------|
+| Hot | 0-30 days | r6g.2xlarge data nodes | Full indexing, real-time search |
+| Warm | 30-90 days | UltraWarm (S3-backed) | Read-only, reduced cost |
+| Cold | 90 days - 7 years | Cold storage | Compliance retention, on-demand rehydration |
+| Delete | >7 years | N/A | Automatic deletion per FINRA policy |
+
+**Neptune Graph Data Model (LLD):**
+
+```mermaid
+graph LR
+    subgraph "Vertices"
+        C[Client<br/>id, name, risk_profile, kyc_status]
+        A[Account<br/>id, type, status, balance]
+        I[Instrument<br/>id, name, type, sector, exchange]
+        ADV[Advisor<br/>id, name, license, region]
+        TX[Transaction<br/>id, amount, timestamp, type]
+    end
+
+    subgraph "Edges"
+        C -->|OWNS| A
+        C -->|ADVISED_BY| ADV
+        A -->|HOLDS| I
+        A -->|EXECUTED| TX
+        TX -->|INVOLVES| I
+        I -->|CORRELATES_WITH| I
+        C -->|TRANSFERS_TO| C
+        ADV -->|MANAGES| A
+    end
+```
+
+**Neptune Vertex/Edge Properties:**
+
+```python
+# src/analytics/graph_model.py
+"""Neptune graph data model definitions."""
+
+class ClientVertex:
+    label = "Client"
+    properties = {
+        "client_id": str,         # Primary key
+        "name": str,
+        "risk_profile": str,      # CONSERVATIVE|MODERATE|AGGRESSIVE|VERY_AGGRESSIVE
+        "kyc_status": str,        # VERIFIED|PENDING|FLAGGED
+        "account_type": str,      # FULL_SERVICE|SELF_SERVICE|AUTOMATED
+        "onboarding_date": datetime,
+        "total_aum": Decimal,     # Assets Under Management
+    }
+
+class AccountVertex:
+    label = "Account"
+    properties = {
+        "account_id": str,
+        "account_type": str,      # INDIVIDUAL|JOINT|IRA|401K|TRUST
+        "status": str,            # ACTIVE|FROZEN|CLOSED
+        "cash_balance": Decimal,
+        "margin_enabled": bool,
+        "created_date": datetime,
+    }
+
+class InstrumentVertex:
+    label = "Instrument"
+    properties = {
+        "instrument_id": str,     # ISIN/CUSIP
+        "name": str,
+        "type": str,              # EQUITY|BOND|OPTION|ETF|MUTUAL_FUND
+        "sector": str,
+        "exchange": str,
+        "currency": str,
+    }
+
+class TransactionEdge:
+    label = "EXECUTED"
+    from_vertex = "Account"
+    to_vertex = "Transaction"
+    properties = {
+        "timestamp": datetime,
+        "side": str,              # BUY|SELL
+        "quantity": Decimal,
+        "price": Decimal,
+        "fees": Decimal,
+    }
+
+# Fraud detection patterns
+FRAUD_QUERIES = {
+    "circular_transactions": """
+        g.V().hasLabel('Client').as('start')
+         .out('OWNS').out('EXECUTED').out('INVOLVES')
+         .in('EXECUTED').in('OWNS')
+         .where(eq('start'))
+         .path()
+    """,
+    "rapid_transfers": """
+        g.V().hasLabel('Client').as('c')
+         .outE('TRANSFERS_TO')
+         .has('timestamp', gte(now_minus_1h))
+         .group().by(select('c'))
+         .unfold()
+         .where(select(values).count(local).is(gt(10)))
+    """,
+    "unusual_velocity": """
+        g.V().hasLabel('Client')
+         .out('OWNS').outE('EXECUTED')
+         .has('timestamp', gte(now_minus_24h))
+         .group().by(inV().values('client_id'))
+         .unfold()
+         .where(select(values).count(local).is(gt(stddev_threshold)))
+    """
+}
+```
+
+
+
+---
+
+## Data Models
+
+### Market Data Event Schema (Bronze Layer)
+
+```python
+# src/models/market_data.py
+"""Market data schemas for Bronze/Silver/Gold layers."""
+from dataclasses import dataclass
+from datetime import datetime
+from decimal import Decimal
+from typing import Optional
+
+@dataclass
+class MarketDataRaw:
+    """Bronze layer: raw market data as received from source."""
+    source_id: str                    # "bloomberg_bpipe" | "thomson_reuters"
+    instrument_id: str                # ISIN or CUSIP
+    instrument_name: str
+    instrument_type: str              # EQUITY | BOND | OPTION | ETF | FUTURES
+    exchange: str                     # NYSE | NASDAQ | LSE | etc.
+    
+    # Price data
+    bid_price: Decimal
+    ask_price: Decimal
+    last_price: Decimal
+    volume: int
+    
+    # Timestamps
+    source_timestamp: datetime        # When source generated the tick
+    ingestion_timestamp: datetime     # When platform received it
+    
+    # Metadata (enriched at ingestion)
+    schema_version: str               # "v2.3.1"
+    partition_key: str                # "{source}/{instrument_type}/{date}"
+    sequence_number: str              # Kinesis sequence for ordering
+    shard_id: str                     # Source Kinesis shard
+    
+    # Quality markers
+    is_delayed: bool                  # True if delayed quote
+    market_status: str                # PRE_MARKET | OPEN | CLOSED | AFTER_HOURS
+
+@dataclass
+class MarketDataSilver:
+    """Silver layer: validated, deduplicated, schema-enforced."""
+    instrument_id: str
+    instrument_type: str
+    trade_date: str                   # Partition key: YYYY-MM-DD
+    
+    bid_price: Decimal
+    ask_price: Decimal
+    last_price: Decimal
+    mid_price: Decimal                # Computed: (bid + ask) / 2
+    spread: Decimal                   # Computed: ask - bid
+    volume: int
+    
+    source_timestamp: datetime
+    processing_job_id: str            # Lineage: which Glue job produced this
+    quality_score: float              # 0.0 - 1.0 from data quality checks
+    dedup_key: str                    # Hash of instrument_id + timestamp + source
+
+@dataclass
+class DailyTradeSummaryGold:
+    """Gold layer: daily aggregated trade summary per instrument."""
+    instrument_id: str
+    instrument_name: str
+    trade_date: str
+    
+    open_price: Decimal
+    high_price: Decimal
+    low_price: Decimal
+    close_price: Decimal
+    vwap: Decimal                     # Volume-weighted average price
+    
+    total_volume: int
+    trade_count: int
+    turnover: Decimal                 # price * quantity summed
+    
+    # Derived metrics
+    daily_return_pct: Decimal
+    volatility_20d: Decimal           # 20-day rolling volatility
+    avg_spread: Decimal
+    
+    # Metadata
+    last_updated: datetime
+    source_record_count: int
+    quality_score: float
+```
+
+### Trade Event Schema
+
+```python
+# src/models/trade.py
+"""Trade lifecycle data models."""
+
+@dataclass
+class TradeEvent:
+    """Canonical trade event flowing through the platform."""
+    trade_id: str                     # UUID
+    order_id: str                     # Parent order UUID
+    client_id: str
+    account_id: str
+    
+    # Instrument
+    instrument_id: str                # ISIN/CUSIP
+    instrument_type: str
+    
+    # Execution details
+    side: str                         # BUY | SELL
+    quantity: Decimal
+    executed_price: Decimal
+    total_value: Decimal              # quantity * price
+    fees: Decimal
+    net_value: Decimal                # total_value +/- fees
+    
+    # Timing
+    order_timestamp: datetime
+    execution_timestamp: datetime
+    settlement_date: str              # T+1 or T+2
+    
+    # Routing
+    venue: str                        # Exchange or dark pool
+    execution_type: str               # MARKET | LIMIT | STOP
+    
+    # Compliance
+    compliance_flags: list[str]       # Any flags raised
+    regulatory_report_id: Optional[str]
+
+@dataclass
+class ClientProfile:
+    """Client profile for advisory and portfolio services."""
+    client_id: str
+    
+    # Demographics
+    name: str
+    age: int
+    tax_filing_status: str
+    state_of_residence: str
+    
+    # Financial
+    annual_income: Decimal
+    total_debt: Decimal
+    household_income: Decimal
+    net_worth: Decimal
+    
+    # Investment profile
+    risk_profile: str                 # CONSERVATIVE | MODERATE | AGGRESSIVE | VERY_AGGRESSIVE
+    investment_strategies: list[str]  # GROWTH | VALUE | INCOME | INDEX
+    investment_horizon_years: int
+    experience_level: str             # NOVICE | INTERMEDIATE | ADVANCED | EXPERT
+    
+    # Account relationship
+    account_ids: list[str]
+    advisor_id: Optional[str]
+    service_tier: str                 # FULL_SERVICE | SELF_SERVICE | AUTOMATED
+    
+    # Compliance
+    kyc_status: str                   # VERIFIED | PENDING | FLAGGED
+    accredited_investor: bool
+    pep_status: bool                  # Politically Exposed Person
+    last_review_date: datetime
+```
+
+### Terraform Module Hierarchy (LLD)
+
+```
+terraform/
+├── modules/
+│   ├── networking/
+│   │   ├── main.tf              # VPC, subnets, route tables, NAT
+│   │   ├── transit_gateway.tf   # TGW, attachments, route tables
+│   │   ├── vpc_endpoints.tf     # S3, Glue, KMS, SQS, EB, CW endpoints
+│   │   ├── security_groups.tf   # SG rules (deny-by-default)
+│   │   ├── variables.tf
+│   │   └── outputs.tf
+│   ├── data-lake/
+│   │   ├── s3_buckets.tf        # Bronze/Silver/Gold buckets
+│   │   ├── lifecycle.tf         # Intelligent-Tiering, Glacier policies
+│   │   ├── encryption.tf        # KMS keys per classification level
+│   │   ├── replication.tf       # CRR to DR region
+│   │   ├── glue_catalog.tf      # Databases, tables, crawlers
+│   │   ├── glue_jobs.tf         # ETL job definitions
+│   │   ├── lake_formation.tf    # Data governance permissions
+│   │   ├── variables.tf
+│   │   └── outputs.tf
+│   ├── compute/
+│   │   ├── lambda_functions.tf  # All Lambda function definitions
+│   │   ├── lambda_layers.tf     # Shared dependency layers
+│   │   ├── api_gateway.tf       # HTTP API + WebSocket API
+│   │   ├── cognito.tf           # User pool, identity pool
+│   │   ├── step_functions.tf    # State machine definitions
+│   │   ├── variables.tf
+│   │   └── outputs.tf
+│   ├── analytics/
+│   │   ├── opensearch.tf        # Domain, access policies, ISM
+│   │   ├── neptune.tf           # Cluster, instances, subnet group
+│   │   ├── athena.tf            # Workgroups, named queries
+│   │   ├── variables.tf
+│   │   └── outputs.tf
+│   ├── streaming/
+│   │   ├── kinesis.tf           # Data streams, shard config
+│   │   ├── eventbridge.tf       # Event bus, rules, schema registry
+│   │   ├── sqs.tf              # Queues, DLQs, FIFO config
+│   │   ├── dms.tf              # CDC replication tasks
+│   │   ├── variables.tf
+│   │   └── outputs.tf
+│   ├── ml/
+│   │   ├── sagemaker.tf         # Domain, endpoints, model registry
+│   │   ├── sagemaker_pipelines.tf
+│   │   ├── variables.tf
+│   │   └── outputs.tf
+│   ├── security/
+│   │   ├── iam_roles.tf         # Service roles (least-privilege)
+│   │   ├── iam_policies.tf      # Custom policies per service
+│   │   ├── kms_keys.tf          # CMKs per classification
+│   │   ├── guardduty.tf         # Threat detection
+│   │   ├── security_hub.tf      # Compliance standards
+│   │   ├── cloudtrail.tf        # Audit trail
+│   │   ├── config_rules.tf      # AWS Config conformance
+│   │   ├── variables.tf
+│   │   └── outputs.tf
+│   └── monitoring/
+│       ├── cloudwatch.tf        # Dashboards, alarms, log groups
+│       ├── xray.tf              # Tracing configuration
+│       ├── sns.tf               # Notification topics
+│       ├── ssm_automation.tf    # Automated runbooks
+│       ├── budgets.tf           # Cost alerts
+│       ├── variables.tf
+│       └── outputs.tf
+├── environments/
+│   ├── dev/
+│   │   ├── main.tf
+│   │   ├── terraform.tfvars
+│   │   └── backend.tf
+│   ├── staging/
+│   │   ├── main.tf
+│   │   ├── terraform.tfvars
+│   │   └── backend.tf
+│   ├── production/
+│   │   ├── main.tf
+│   │   ├── terraform.tfvars
+│   │   └── backend.tf
+│   └── dr/
+│       ├── main.tf
+│       ├── terraform.tfvars
+│       └── backend.tf
+├── global/
+│   ├── organizations.tf         # AWS Organizations, SCPs
+│   ├── baseline_security.tf     # Account-level baselines
+│   └── transit_gateway.tf       # Cross-account networking
+└── terragrunt.hcl               # DRY configuration management
+```
+
+
+
+### IAM Policy Structures (LLD - Least Privilege)
+
+```python
+# Terraform IAM policy definitions (represented as Python dicts for clarity)
+
+# Market Data Ingestion Lambda Role
+MARKET_DATA_LAMBDA_POLICY = {
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "KinesisRead",
+            "Effect": "Allow",
+            "Action": [
+                "kinesis:GetRecords",
+                "kinesis:GetShardIterator",
+                "kinesis:DescribeStream",
+                "kinesis:ListShards"
+            ],
+            "Resource": "arn:aws:kinesis:{region}:{account}:stream/vb-market-data-*"
+        },
+        {
+            "Sid": "S3BronzeWrite",
+            "Effect": "Allow",
+            "Action": ["s3:PutObject", "s3:PutObjectTagging"],
+            "Resource": "arn:aws:s3:::vb-bronze-{env}/*"
+        },
+        {
+            "Sid": "GlueCatalogUpdate",
+            "Effect": "Allow",
+            "Action": ["glue:UpdatePartition", "glue:BatchCreatePartition"],
+            "Resource": [
+                "arn:aws:glue:{region}:{account}:catalog",
+                "arn:aws:glue:{region}:{account}:database/verticalbroker_bronze",
+                "arn:aws:glue:{region}:{account}:table/verticalbroker_bronze/*"
+            ]
+        },
+        {
+            "Sid": "EventBridgePut",
+            "Effect": "Allow",
+            "Action": ["events:PutEvents"],
+            "Resource": "arn:aws:events:{region}:{account}:event-bus/verticalbroker-platform"
+        },
+        {
+            "Sid": "SQSDLQWrite",
+            "Effect": "Allow",
+            "Action": ["sqs:SendMessage"],
+            "Resource": "arn:aws:sqs:{region}:{account}:market-data-dlq"
+        },
+        {
+            "Sid": "KMSDecryptEncrypt",
+            "Effect": "Allow",
+            "Action": ["kms:Decrypt", "kms:GenerateDataKey"],
+            "Resource": "arn:aws:kms:{region}:{account}:key/{bronze-key-id}"
+        },
+        {
+            "Sid": "DynamoDBIdempotency",
+            "Effect": "Allow",
+            "Action": ["dynamodb:PutItem", "dynamodb:GetItem", "dynamodb:DeleteItem"],
+            "Resource": "arn:aws:dynamodb:{region}:{account}:table/IdempotencyStore"
+        }
+    ]
+}
+
+# ETL Glue Job Role
+ETL_GLUE_ROLE_POLICY = {
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "S3ReadBronzeSilver",
+            "Effect": "Allow",
+            "Action": ["s3:GetObject", "s3:ListBucket"],
+            "Resource": [
+                "arn:aws:s3:::vb-bronze-{env}",
+                "arn:aws:s3:::vb-bronze-{env}/*",
+                "arn:aws:s3:::vb-silver-{env}",
+                "arn:aws:s3:::vb-silver-{env}/*"
+            ]
+        },
+        {
+            "Sid": "S3WriteSilverGold",
+            "Effect": "Allow",
+            "Action": ["s3:PutObject", "s3:DeleteObject"],
+            "Resource": [
+                "arn:aws:s3:::vb-silver-{env}/*",
+                "arn:aws:s3:::vb-gold-{env}/*"
+            ]
+        },
+        {
+            "Sid": "GlueCatalogFull",
+            "Effect": "Allow",
+            "Action": ["glue:*Partition*", "glue:GetTable", "glue:GetDatabase"],
+            "Resource": [
+                "arn:aws:glue:{region}:{account}:catalog",
+                "arn:aws:glue:{region}:{account}:database/verticalbroker_*",
+                "arn:aws:glue:{region}:{account}:table/verticalbroker_*/*"
+            ]
+        },
+        {
+            "Sid": "CloudWatchLogs",
+            "Effect": "Allow",
+            "Action": ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"],
+            "Resource": "arn:aws:logs:{region}:{account}:log-group:/aws-glue/*"
+        }
+    ]
+}
+
+# Advisory Agent Lambda Role
+ADVISORY_AGENT_POLICY = {
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "SageMakerInvoke",
+            "Effect": "Allow",
+            "Action": ["sagemaker:InvokeEndpoint"],
+            "Resource": "arn:aws:sagemaker:{region}:{account}:endpoint/vb-advisory-*"
+        },
+        {
+            "Sid": "RegulatoryStoreWrite",
+            "Effect": "Allow",
+            "Action": ["s3:PutObject"],
+            "Resource": "arn:aws:s3:::vb-regulatory-store-{env}/advisory-logs/*",
+            "Condition": {
+                "StringEquals": {"s3:x-amz-object-lock-mode": "COMPLIANCE"}
+            }
+        },
+        {
+            "Sid": "ParameterStoreRead",
+            "Effect": "Allow",
+            "Action": ["ssm:GetParameter", "ssm:GetParametersByPath"],
+            "Resource": "arn:aws:ssm:{region}:{account}:parameter/verticalbroker/advisory/*"
+        }
+    ]
+}
+```
+
+### Security Architecture (HLD)
+
+```mermaid
+graph TB
+    subgraph "Identity & Access"
+        COG[Cognito User Pool<br/>JWT Authentication]
+        IAM[IAM Roles<br/>Least Privilege]
+        PB[Permission Boundaries<br/>Maximum Permissions]
+        LF[Lake Formation<br/>Column-Level Access]
+    end
+
+    subgraph "Encryption"
+        KMS_PUB[KMS Key: Public Data]
+        KMS_INT[KMS Key: Internal Data]
+        KMS_CONF[KMS Key: Confidential]
+        KMS_REST[KMS Key: Restricted/PII]
+        TLS[TLS 1.3<br/>In-Transit Encryption]
+    end
+
+    subgraph "Detection & Response"
+        GD[GuardDuty<br/>Threat Detection]
+        SH[Security Hub<br/>FSBP + CIS]
+        CT[CloudTrail<br/>API Audit]
+        CFG[AWS Config<br/>Compliance Rules]
+        MACIE[Macie<br/>PII Discovery]
+    end
+
+    subgraph "Data Protection"
+        OL[S3 Object Lock<br/>COMPLIANCE Mode]
+        MASK[Glue DataBrew<br/>PII Masking]
+        VER[S3 Versioning<br/>Immutability]
+    end
+
+    COG --> IAM --> PB
+    IAM --> LF
+    KMS_REST --> OL
+    GD --> SH
+    CT --> SH
+    CFG --> SH
+```
+
+### CDC Pipeline Design (LLD)
+
+```python
+# src/services/cdc/schema_evolution.py
+"""CDC Pipeline: Schema evolution detection and handling."""
+
+class CDCPipelineConfig:
+    """DMS replication task configuration."""
+    source_endpoint: str          # Source RDS/Aurora endpoint
+    target_endpoint: str          # S3 Bronze target
+    replication_instance: str     # dms.r6i.2xlarge
+    migration_type: str           # "full-load-and-cdc" | "cdc" | "full-load"
+    
+    # CDC settings
+    cdc_start_position: str       # "server-time" or LSN
+    max_lag_seconds: int = 60     # Alert threshold
+    batch_apply_enabled: bool = True
+    batch_size: int = 1000
+    
+    # Table mappings
+    table_mappings: dict = {
+        "rules": [
+            {
+                "rule-type": "selection",
+                "rule-id": "1",
+                "rule-action": "include",
+                "object-locator": {
+                    "schema-name": "trading",
+                    "table-name": "%"
+                }
+            }
+        ]
+    }
+
+class SchemaEvolutionHandler:
+    """Detect and handle DDL changes from source systems."""
+    
+    def detect_schema_change(self, event: dict) -> Optional[SchemaChange]:
+        """Parse DMS event for DDL changes."""
+        ...
+    
+    def update_glue_catalog(self, change: SchemaChange):
+        """Propagate schema change to Glue Data Catalog."""
+        ...
+    
+    def notify_downstream(self, change: SchemaChange):
+        """Emit schema.evolved event for downstream consumers."""
+        ...
+
+class CDCRecord:
+    """Individual CDC record with before/after images."""
+    operation: str              # INSERT | UPDATE | DELETE
+    schema_name: str
+    table_name: str
+    before_image: Optional[dict]  # Previous row state (UPDATE/DELETE)
+    after_image: Optional[dict]   # New row state (INSERT/UPDATE)
+    transaction_id: str
+    commit_timestamp: datetime
+    source_lsn: str              # Log Sequence Number
+```
+
+
+
+---
+
+## Error Handling
+
+### Reliability Patterns Architecture
+
+```mermaid
+graph TB
+    subgraph "Resilience Patterns"
+        direction TB
+        IDP[Idempotency<br/>DynamoDB Tokens]
+        CB[Circuit Breaker<br/>State Machine]
+        RET[Retry + Backoff<br/>Exponential]
+        DLQ[Dead Letter Queue<br/>SQS]
+        HC[Health Checks<br/>CloudWatch Synthetic]
+        TOB[Transactional Outbox<br/>DynamoDB Streams]
+    end
+
+    subgraph "Error Flow"
+        REQ[Incoming Request] --> IDP
+        IDP --> CB
+        CB -->|Closed| PROC[Process]
+        CB -->|Open| FALLBACK[Fallback Response]
+        PROC -->|Success| RESP[Response]
+        PROC -->|Failure| RET
+        RET -->|Exhausted| DLQ
+        DLQ --> ALERT[CloudWatch Alarm]
+        ALERT --> RUNBOOK[SSM Runbook]
+    end
+```
+
+### Idempotency Pattern (LLD)
+
+```python
+# src/common/idempotency.py
+"""DynamoDB-based idempotency implementation using Lambda Powertools."""
+from aws_lambda_powertools.utilities.idempotency import (
+    DynamoDBPersistenceLayer,
+    IdempotencyConfig,
+    idempotent_function
+)
+
+# DynamoDB Table Schema:
+# PK: idempotency_key (string) - Client-provided or derived key
+# TTL: expiration (number) - Auto-cleanup after 24 hours
+# status: INPROGRESS | COMPLETED | EXPIRED
+# data: Cached response (compressed JSON)
+# in_progress_expiration: Lock timeout (prevents zombie locks)
+
+persistence_layer = DynamoDBPersistenceLayer(
+    table_name="IdempotencyStore",
+    key_attr="idempotency_key",
+    expiry_attr="expiration",
+    status_attr="status",
+    data_attr="data",
+    in_progress_expiry_attr="in_progress_expiration"
+)
+
+config = IdempotencyConfig(
+    expires_after_seconds=86400,          # 24h TTL
+    use_local_cache=True,                  # In-memory cache for hot path
+    local_cache_max_items=1000,
+    event_key_jmespath="powertools_json(body).idempotency_key",
+    raise_on_no_idempotency_key=True
+)
+
+@idempotent_function(
+    data_keyword_argument="order_request",
+    persistence_store=persistence_layer,
+    config=config
+)
+def process_order(order_request: dict) -> dict:
+    """Idempotent order processing - same input always returns same output."""
+    # Business logic here
+    ...
+```
+
+### Circuit Breaker Pattern (LLD)
+
+```python
+# src/common/circuit_breaker.py
+"""Circuit breaker for downstream service calls."""
+from enum import Enum
+from datetime import datetime, timedelta
+import boto3
+
+class CircuitState(Enum):
+    CLOSED = "closed"       # Normal operation
+    OPEN = "open"           # Failing, reject requests
+    HALF_OPEN = "half_open" # Testing recovery
+
+class CircuitBreaker:
+    """DynamoDB-backed circuit breaker for distributed Lambda functions."""
+
+    def __init__(self, service_name: str, failure_threshold: int = 5,
+                 recovery_timeout: int = 60, success_threshold: int = 3):
+        self.service_name = service_name
+        self.failure_threshold = failure_threshold
+        self.recovery_timeout = timedelta(seconds=recovery_timeout)
+        self.success_threshold = success_threshold
+        self.dynamodb = boto3.resource('dynamodb')
+        self.table = self.dynamodb.Table('CircuitBreakerState')
+
+    def get_state(self) -> CircuitState:
+        """Read current circuit state from DynamoDB."""
+        item = self.table.get_item(Key={'service_name': self.service_name})
+        ...
+
+    def record_success(self):
+        """Record successful call. May transition HALF_OPEN → CLOSED."""
+        ...
+
+    def record_failure(self, error: Exception):
+        """Record failed call. May transition CLOSED → OPEN."""
+        ...
+
+    def can_execute(self) -> bool:
+        """Check if request should be allowed through."""
+        state = self.get_state()
+        if state == CircuitState.CLOSED:
+            return True
+        elif state == CircuitState.OPEN:
+            if self._recovery_timeout_elapsed():
+                self._transition_to_half_open()
+                return True
+            return False
+        elif state == CircuitState.HALF_OPEN:
+            return True  # Allow probe request
+
+    def execute(self, func, *args, **kwargs):
+        """Execute function with circuit breaker protection."""
+        if not self.can_execute():
+            raise CircuitOpenError(f"Circuit open for {self.service_name}")
+        try:
+            result = func(*args, **kwargs)
+            self.record_success()
+            return result
+        except Exception as e:
+            self.record_failure(e)
+            raise
+```
+
+### Retry with Exponential Backoff (LLD)
+
+```python
+# src/common/retry.py
+"""Configurable retry with exponential backoff and jitter."""
+import time
+import random
+from functools import wraps
+from aws_lambda_powertools import Logger
+
+logger = Logger()
+
+class RetryConfig:
+    base_delay: float = 1.0        # Initial delay in seconds
+    max_delay: float = 300.0       # Maximum delay (5 minutes)
+    max_attempts: int = 3          # Total attempts before DLQ
+    backoff_factor: float = 2.0    # Exponential multiplier
+    jitter: bool = True            # Add randomization to prevent thundering herd
+    retryable_exceptions: tuple = (
+        ConnectionError,
+        TimeoutError,
+        ThrottlingException,
+    )
+
+def retry_with_backoff(config: RetryConfig = RetryConfig()):
+    """Decorator for retry with exponential backoff."""
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            last_exception = None
+            for attempt in range(config.max_attempts):
+                try:
+                    return func(*args, **kwargs)
+                except config.retryable_exceptions as e:
+                    last_exception = e
+                    if attempt < config.max_attempts - 1:
+                        delay = min(
+                            config.base_delay * (config.backoff_factor ** attempt),
+                            config.max_delay
+                        )
+                        if config.jitter:
+                            delay *= random.uniform(0.5, 1.5)
+                        logger.warning(f"Retry {attempt + 1}/{config.max_attempts}",
+                                      delay=delay, error=str(e))
+                        time.sleep(delay)
+            # All retries exhausted - route to DLQ
+            raise MaxRetriesExceededError(last_exception)
+        return wrapper
+    return decorator
+```
+
+### Dead-Letter Queue Handling (LLD)
+
+```python
+# src/common/dlq_handler.py
+"""DLQ processor for failed messages - alerting and reprocessing."""
+
+class DLQProcessor:
+    """Handles messages that exhausted all retry attempts."""
+
+    def __init__(self):
+        self.eventbridge = boto3.client('events')
+        self.cloudwatch = boto3.client('cloudwatch')
+
+    def process_dlq_message(self, message: dict):
+        """Analyze failed message, emit alert, store for reprocessing."""
+        failure_context = {
+            "original_queue": message.get("source_queue"),
+            "failure_reason": message.get("error_message"),
+            "retry_count": message.get("ApproximateReceiveCount"),
+            "first_received": message.get("SentTimestamp"),
+            "message_id": message.get("MessageId"),
+        }
+        
+        # Emit pipeline.failed event
+        self.eventbridge.put_events(Entries=[{
+            "Source": "verticalbroker.dlq-processor",
+            "DetailType": "MessageDeadLettered",
+            "Detail": json.dumps(failure_context),
+            "EventBusName": "verticalbroker-platform"
+        }])
+        
+        # Increment DLQ depth metric
+        self.cloudwatch.put_metric_data(
+            Namespace="VerticalBroker/DLQ",
+            MetricData=[{
+                "MetricName": "DeadLetteredMessages",
+                "Value": 1,
+                "Dimensions": [
+                    {"Name": "Queue", "Value": failure_context["original_queue"]}
+                ]
+            }]
+        )
+```
+
+### Transactional Outbox Pattern (LLD)
+
+```python
+# src/common/outbox.py
+"""Transactional outbox pattern using DynamoDB Streams."""
+
+class TransactionalOutbox:
+    """Ensures events are published exactly once alongside state changes.
+    
+    Pattern:
+    1. Write business state + outbox record in single DynamoDB transaction
+    2. DynamoDB Stream triggers outbox publisher Lambda
+    3. Publisher emits event to EventBridge
+    4. Publisher marks outbox record as published
+    """
+
+    def __init__(self, table_name: str):
+        self.dynamodb = boto3.resource('dynamodb')
+        self.table = self.dynamodb.Table(table_name)
+
+    def execute_with_outbox(self, business_item: dict, event: dict) -> dict:
+        """Atomically write business data and outbox event."""
+        outbox_record = {
+            "PK": f"OUTBOX#{uuid4()}",
+            "SK": f"EVENT#{datetime.utcnow().isoformat()}",
+            "event_type": event["detail_type"],
+            "event_payload": json.dumps(event["detail"]),
+            "published": False,
+            "created_at": datetime.utcnow().isoformat(),
+            "ttl": int((datetime.utcnow() + timedelta(days=7)).timestamp())
+        }
+        
+        # Transactional write: business item + outbox in one operation
+        self.dynamodb.meta.client.transact_write_items(
+            TransactItems=[
+                {"Put": {"TableName": self.table.name, "Item": business_item}},
+                {"Put": {"TableName": self.table.name, "Item": outbox_record}}
+            ]
+        )
+        return outbox_record
+```
+
+### Regional Failover Design (LLD)
+
+```mermaid
+graph LR
+    subgraph "Primary Region (us-east-1)"
+        P_API[API Gateway]
+        P_LAMBDA[Lambda Functions]
+        P_S3[S3 Data Lake]
+        P_DDB[DynamoDB Global Tables]
+        P_KDS[Kinesis Streams]
+    end
+
+    subgraph "DR Region (us-west-2)"
+        DR_API[API Gateway<br/>Pre-provisioned]
+        DR_LAMBDA[Lambda Functions<br/>Deployed]
+        DR_S3[S3 Replica<br/>CRR < 15min]
+        DR_DDB[DynamoDB Global Tables<br/>Active-Active]
+        DR_KDS[Kinesis Streams<br/>Standby]
+    end
+
+    subgraph "Failover Control"
+        R53[Route 53<br/>Health Checks]
+        R53 -->|Healthy| P_API
+        R53 -->|Failover| DR_API
+    end
+
+    P_S3 -.->|CRR| DR_S3
+    P_DDB -.->|Global Tables| DR_DDB
+```
+
+**Failover Procedure:**
+
+| Step | Action | RTO Contribution |
+|------|--------|-----------------|
+| 1 | Route 53 health check fails (3 consecutive) | 30 seconds |
+| 2 | Automated DNS failover to DR region | 60 seconds (TTL) |
+| 3 | DR Lambda functions handle traffic (already deployed) | 0 seconds |
+| 4 | DynamoDB Global Tables active (no promotion needed) | 0 seconds |
+| 5 | Verify S3 CRR lag < 1 hour (RPO check) | 5 minutes |
+| 6 | Activate DR Kinesis streams for new ingestion | 30 minutes |
+| 7 | Start DR Glue jobs for pipeline continuity | 60 minutes |
+| 8 | Verify end-to-end data flow | 30 minutes |
+| **Total** | | **~2.5 hours (within 4h RTO)** |
+
+### Blue-Green Deployment Pattern (LLD)
+
+```mermaid
+graph TB
+    subgraph "Blue-Green Lambda Deployment"
+        ALIAS[Lambda Alias: LIVE]
+        V1[Version N<br/>Current (Blue)]
+        V2[Version N+1<br/>New (Green)]
+        
+        ALIAS -->|95% traffic| V1
+        ALIAS -->|5% canary| V2
+    end
+
+    subgraph "Rollback Decision"
+        CW[CloudWatch Alarms<br/>Error Rate > 5%]
+        CW -->|Alarm| ROLLBACK[Shift 100% → Blue]
+        CW -->|OK after 10min| PROMOTE[Shift 100% → Green]
+    end
+```
+
+```python
+# deployment/blue_green.py
+"""Blue-green deployment with automated rollback."""
+
+class BlueGreenDeployer:
+    """Manages Lambda alias traffic shifting with safety checks."""
+
+    def deploy_canary(self, function_name: str, new_version: str, 
+                     canary_percent: int = 5, bake_time_minutes: int = 10):
+        """Deploy new version with canary traffic splitting."""
+        self.lambda_client.update_alias(
+            FunctionName=function_name,
+            Name='LIVE',
+            FunctionVersion=new_version,
+            RoutingConfig={
+                'AdditionalVersionWeights': {new_version: canary_percent / 100}
+            }
+        )
+        # Monitor error rate during bake time
+        # Rollback if error_rate > 5%
+        ...
+
+    def promote(self, function_name: str, new_version: str):
+        """Promote green to 100% traffic."""
+        ...
+
+    def rollback(self, function_name: str, stable_version: str):
+        """Emergency rollback to blue version."""
+        ...
+```
+
+
+
+---
+
+## Testing Strategy
+
+### Why Property-Based Testing Does NOT Apply
+
+This platform is primarily **Infrastructure as Code (Terraform)**, **AWS managed service configuration**, and **side-effect-heavy operations** (writing to S3, invoking SageMaker endpoints, sending messages to queues). These characteristics make property-based testing inappropriate:
+
+1. **IaC is declarative configuration** — Terraform modules define desired state, not functions with inputs/outputs
+2. **AWS service interactions are side-effects** — Lambda functions invoke external services, not pure transformations
+3. **Most acceptance criteria test infrastructure wiring** — verifying that S3 lifecycle policies are configured correctly, not that algorithms produce correct outputs
+4. **Cost of 100 iterations is prohibitive** — each test would require real AWS service calls
+
+Instead, the platform uses the following complementary testing approaches:
+
+### Testing Pyramid
+
+```mermaid
+graph TB
+    subgraph "Testing Layers"
+        E2E[End-to-End Tests<br/>AWS Integration<br/>~20 tests, 30 min]
+        INT[Integration Tests<br/>LocalStack + Moto<br/>~100 tests, 10 min]
+        UNIT[Unit Tests<br/>pytest + mocks<br/>~500 tests, 2 min]
+        STATIC[Static Analysis<br/>tflint, checkov, tfsec, mypy<br/>~1000 checks, 1 min]
+    end
+
+    E2E ---|Confidence| INT
+    INT ---|Speed| UNIT
+    UNIT ---|Coverage| STATIC
+```
+
+### Testing Strategy by Component
+
+| Component | Test Type | Tools | Focus |
+|-----------|-----------|-------|-------|
+| Terraform Modules | Plan validation + Security scan | `terraform validate`, `tflint`, `checkov`, `tfsec` | No high-severity findings, valid HCL, security compliance |
+| Lambda Functions | Unit tests + Integration tests | `pytest`, `moto`, `localstack` | Business logic, error handling, idempotency |
+| Glue PySpark Jobs | Unit tests + Data quality | `pytest`, `pyspark` (local), `great_expectations` | Transformation logic, schema validation, dedup |
+| API Gateway | Contract tests + Load tests | `schemathesis` (OpenAPI), `locust` | Schema compliance, rate limiting, auth |
+| EventBridge | Integration tests | `localstack`, `moto` | Event routing, schema validation, delivery |
+| Step Functions | State machine tests | `stepfunctions-local`, `pytest` | State transitions, error handling, retries |
+| SageMaker | Model validation + Bias tests | `pytest`, `sagemaker SDK`, `SHAP` | Accuracy, fairness, latency, governance |
+| OpenSearch | Index validation + Query tests | `opensearch-py`, `pytest` | Mapping correctness, query performance |
+| Neptune | Graph model tests | `gremlinpython`, `pytest` | Traversal correctness, fraud pattern detection |
+| Security | Policy validation + Compliance | `checkov`, `AWS Config`, `SecurityHub` | IAM least-privilege, encryption, audit trail |
+
+### Terraform Testing (LLD)
+
+```python
+# tests/terraform/test_data_lake_module.py
+"""Terraform module tests using terraform plan output validation."""
+import pytest
+import json
+import subprocess
+
+class TestDataLakeModule:
+    """Validate data lake Terraform module configuration."""
+
+    @pytest.fixture
+    def terraform_plan(self):
+        """Generate Terraform plan as JSON for inspection."""
+        result = subprocess.run(
+            ["terraform", "plan", "-out=tfplan", "-var-file=test.tfvars"],
+            capture_output=True, cwd="terraform/modules/data-lake"
+        )
+        plan_json = subprocess.run(
+            ["terraform", "show", "-json", "tfplan"],
+            capture_output=True, cwd="terraform/modules/data-lake"
+        )
+        return json.loads(plan_json.stdout)
+
+    def test_s3_buckets_have_encryption(self, terraform_plan):
+        """All S3 buckets must use KMS encryption."""
+        s3_resources = [r for r in terraform_plan["planned_values"]["root_module"]["resources"]
+                       if r["type"] == "aws_s3_bucket"]
+        for bucket in s3_resources:
+            assert "server_side_encryption_configuration" in bucket["values"]
+
+    def test_s3_buckets_have_versioning(self, terraform_plan):
+        """Bronze layer buckets must have versioning enabled."""
+        ...
+
+    def test_s3_object_lock_compliance_mode(self, terraform_plan):
+        """Regulatory buckets must use COMPLIANCE mode object lock."""
+        ...
+
+    def test_no_wildcard_iam_resources(self, terraform_plan):
+        """No IAM policies use wildcard (*) resource in production."""
+        iam_policies = [r for r in terraform_plan["planned_values"]["root_module"]["resources"]
+                       if r["type"] == "aws_iam_policy"]
+        for policy in iam_policies:
+            statements = json.loads(policy["values"]["policy"])["Statement"]
+            for stmt in statements:
+                assert stmt.get("Resource") != "*", \
+                    f"Wildcard resource in policy: {policy['name']}"
+
+    def test_mandatory_tags_present(self, terraform_plan):
+        """All resources must have mandatory tags."""
+        mandatory_tags = ["Environment", "Service", "Owner", "CostCenter", 
+                         "DataClassification", "Compliance"]
+        for resource in terraform_plan["planned_values"]["root_module"]["resources"]:
+            if "tags" in resource.get("values", {}):
+                for tag in mandatory_tags:
+                    assert tag in resource["values"]["tags"]
+
+    def test_no_public_s3_buckets(self, terraform_plan):
+        """No S3 buckets allow public access."""
+        ...
+
+    def test_vpc_endpoints_configured(self, terraform_plan):
+        """Required VPC endpoints exist for all AWS services."""
+        ...
+```
+
+### Lambda Function Unit Tests (LLD)
+
+```python
+# tests/unit/test_market_data_processor.py
+"""Unit tests for Market Data Ingestion Service."""
+import pytest
+from unittest.mock import MagicMock, patch
+from datetime import datetime
+from decimal import Decimal
+
+class TestMarketDataProcessor:
+    """Test market data validation, enrichment, and routing."""
+
+    @pytest.fixture
+    def processor(self):
+        with patch('boto3.client'):
+            return MarketDataProcessor()
+
+    @pytest.fixture
+    def valid_bloomberg_record(self):
+        return {
+            "source_id": "bloomberg_bpipe",
+            "instrument_id": "US0378331005",
+            "instrument_type": "EQUITY",
+            "bid_price": "150.25",
+            "ask_price": "150.30",
+            "last_price": "150.27",
+            "volume": 1000000,
+            "source_timestamp": "2024-01-15T14:30:00Z"
+        }
+
+    def test_valid_record_enriched_with_metadata(self, processor, valid_bloomberg_record):
+        """Valid records get enriched with ingestion timestamp and partition key."""
+        result = processor.process_record(valid_bloomberg_record)
+        assert result.ingestion_ts is not None
+        assert result.partition_key == "bloomberg_bpipe/EQUITY/2024-01-15"
+        assert result.schema_version is not None
+
+    def test_malformed_record_routed_to_dlq(self, processor):
+        """Records failing schema validation go to dead-letter queue."""
+        malformed = {"source_id": "bloomberg_bpipe"}  # Missing required fields
+        with pytest.raises(ValidationError):
+            processor.process_record(malformed)
+
+    def test_dedup_key_derived_correctly(self, processor, valid_bloomberg_record):
+        """Dedup key is composite of instrument_id + timestamp + source."""
+        result = processor.process_record(valid_bloomberg_record)
+        expected_key = hash("US0378331005|2024-01-15T14:30:00Z|bloomberg_bpipe")
+        assert result.dedup_key is not None
+
+    def test_batch_write_produces_parquet(self, processor):
+        """Micro-batch writes valid Parquet to S3 Bronze."""
+        ...
+
+    def test_partition_registered_in_glue_catalog(self, processor):
+        """New partitions trigger Glue Data Catalog registration."""
+        ...
+
+
+# tests/unit/test_order_manager.py
+"""Unit tests for Order Manager Service."""
+
+class TestOrderManager:
+    """Test order validation, execution, and idempotency."""
+
+    def test_idempotent_order_returns_cached_response(self):
+        """Duplicate order with same idempotency key returns cached result."""
+        ...
+
+    def test_margin_check_rejects_insufficient_funds(self):
+        """Orders exceeding available margin are rejected."""
+        ...
+
+    def test_trade_event_emitted_on_execution(self):
+        """Successful execution emits trade.executed to EventBridge."""
+        ...
+
+    def test_invalid_instrument_rejected(self):
+        """Orders for non-existent instruments are rejected with clear error."""
+        ...
+
+
+# tests/unit/test_advisory_agent.py
+"""Unit tests for Advisory Agent Service."""
+
+class TestAdvisoryAgent:
+    """Test recommendation generation and governance."""
+
+    def test_low_confidence_flagged_for_review(self):
+        """Recommendations with confidence < 0.7 require human review."""
+        ...
+
+    def test_all_recommendations_logged_to_regulatory_store(self):
+        """Every recommendation is persisted for FINRA audit compliance."""
+        ...
+
+    def test_model_version_included_in_response(self):
+        """Response includes the model version used for inference."""
+        ...
+
+    def test_inference_timeout_returns_error(self):
+        """SageMaker timeout produces structured error response."""
+        ...
+```
+
+### Integration Tests (LLD)
+
+```python
+# tests/integration/test_pipeline_e2e.py
+"""End-to-end pipeline integration tests using LocalStack."""
+import pytest
+import boto3
+from testcontainers.localstack import LocalStackContainer
+
+@pytest.fixture(scope="session")
+def localstack():
+    """Spin up LocalStack for AWS service mocking."""
+    with LocalStackContainer(image="localstack/localstack:3.0") as container:
+        yield container
+
+@pytest.fixture
+def s3_client(localstack):
+    return boto3.client('s3', endpoint_url=localstack.get_url())
+
+class TestBronzeToSilverPipeline:
+    """Integration test: data flows correctly through Bronze → Silver."""
+
+    def test_valid_data_transforms_to_silver(self, s3_client):
+        """Valid Bronze data produces correct Silver Parquet output."""
+        # Arrange: Upload test data to Bronze bucket
+        # Act: Trigger ETL job
+        # Assert: Silver bucket contains validated Parquet
+        ...
+
+    def test_invalid_records_routed_to_error_partition(self, s3_client):
+        """Records failing validation land in _errors/ partition."""
+        ...
+
+    def test_deduplication_removes_exact_duplicates(self, s3_client):
+        """Duplicate records (same instrument+timestamp+source) are removed."""
+        ...
+
+
+class TestEventDrivenFlow:
+    """Integration test: events route correctly through EventBridge."""
+
+    def test_data_ingested_triggers_etl_orchestration(self, localstack):
+        """data.ingested event starts Step Functions execution."""
+        ...
+
+    def test_pipeline_failed_triggers_alarm(self, localstack):
+        """pipeline.failed event creates CloudWatch alarm."""
+        ...
+```
+
+### Security and Compliance Testing (LLD)
+
+```python
+# tests/security/test_iam_policies.py
+"""Security tests: validate least-privilege IAM policies."""
+
+class TestIAMCompliance:
+    """Ensure all IAM policies follow least-privilege principles."""
+
+    def test_no_admin_access_policies(self):
+        """No service role has AdministratorAccess or PowerUser."""
+        ...
+
+    def test_all_roles_have_permission_boundaries(self):
+        """All service roles are constrained by permission boundaries."""
+        ...
+
+    def test_no_cross_account_assume_without_external_id(self):
+        """Cross-account trust requires ExternalId condition."""
+        ...
+
+# tests/security/test_encryption.py
+class TestEncryptionCompliance:
+    """Verify all data is encrypted at rest and in transit."""
+
+    def test_all_s3_buckets_kms_encrypted(self):
+        """Every S3 bucket uses CMK encryption, not default SSE."""
+        ...
+
+    def test_kms_key_rotation_enabled(self):
+        """All CMKs have annual automatic rotation configured."""
+        ...
+
+    def test_tls_minimum_version(self):
+        """All endpoints enforce TLS 1.3 minimum."""
+        ...
+```
+
+### CI/CD Pipeline Testing Flow
+
+```mermaid
+graph LR
+    subgraph "CI Pipeline Stages"
+        SRC[Source<br/>Git Push] --> LINT[Static Analysis<br/>tflint, mypy, ruff]
+        LINT --> UNIT[Unit Tests<br/>pytest --cov > 80%]
+        UNIT --> SEC[Security Scan<br/>checkov, tfsec, bandit]
+        SEC --> PLAN[Terraform Plan<br/>No unexpected destroys]
+        PLAN --> INT[Integration Tests<br/>LocalStack]
+        INT --> APPROVE{Manual Approval<br/>Production Only}
+        APPROVE --> DEPLOY[Deploy<br/>Blue-Green]
+        DEPLOY --> SMOKE[Smoke Tests<br/>Health checks]
+        SMOKE --> MONITOR[Monitor<br/>Error rate < 5%]
+    end
+```
+
+### Scale Testing Parameters
+
+| Test Scenario | Load Profile | Duration | Success Criteria |
+|--------------|-------------|----------|-----------------|
+| Sustained ingestion | 1,157 rec/sec (average) | 24 hours | Zero data loss, <5s latency |
+| Burst ingestion | 12,000 rec/sec (10x) | 15 minutes | Auto-scale, no throttling |
+| API load test | 10,000 req/sec | 1 hour | P99 <500ms, 0% 5xx |
+| ETL batch processing | 500 GB input | 60 minutes | Complete within SLA |
+| Concurrent queries | 100 Athena queries | 30 minutes | All complete, cost within limits |
+| Failover drill | Region failure simulation | 4 hours | RTO met, RPO verified |
+
+### Monitoring and Observability Testing
+
+```python
+# tests/monitoring/test_alarms.py
+"""Verify CloudWatch alarms fire correctly for all failure modes."""
+
+class TestAlarmConfiguration:
+    """Ensure alarms are configured for all SLA-critical paths."""
+
+    REQUIRED_ALARMS = [
+        "pipeline-latency-sla-breach",
+        "api-error-rate-above-1pct",
+        "lambda-throttling-detected",
+        "sqs-depth-above-10k",
+        "infrastructure-cpu-above-80pct",
+        "cdc-replication-lag-above-60s",
+        "kinesis-iterator-age-above-5s",
+        "glue-job-failure",
+        "cost-budget-80pct-threshold",
+    ]
+
+    def test_all_critical_alarms_exist(self):
+        """All required alarms are defined in Terraform."""
+        ...
+
+    def test_alarm_actions_configured(self):
+        """All alarms have SNS action for PagerDuty notification."""
+        ...
+
+    def test_alarm_evaluation_periods(self):
+        """Alarms use appropriate evaluation periods (not too sensitive)."""
+        ...
+```
+
+---
+
+## Appendix: Scale Design Reference
+
+### Capacity Planning
+
+| Dimension | Current | Growth (2yr) | Design Capacity |
+|-----------|---------|-------------|-----------------|
+| Daily ingestion volume | 100M records | 200M records | 300M records |
+| Raw data per day | 200-500 GB | 500 GB-1 TB | 1.5 TB |
+| Total data estate | 10 PB | 25 PB | 30 PB |
+| Monthly active users | 200M | 400M | 500M |
+| Peak API requests/sec | 10,000 | 25,000 | 50,000 |
+| Concurrent WebSocket | 50,000 | 100,000 | 150,000 |
+
+### Lambda Concurrency Reservation
+
+| Function | Reserved | Provisioned | Rationale |
+|----------|----------|-------------|-----------|
+| Market Data Ingestion | 2,000 | 500 | High burst, latency-sensitive |
+| Trade Processing | 1,000 | 200 | Order execution SLA |
+| Advisory Agent | 500 | 100 | SageMaker endpoint warm |
+| API Handlers (general) | 1,000 | 0 | On-demand scaling |
+| ETL Triggers | 200 | 0 | Async, not latency-sensitive |
+| DLQ Processors | 100 | 0 | Background processing |
+
+### Cost Optimization Strategy
+
+| Strategy | Component | Projected Savings |
+|----------|-----------|------------------|
+| S3 Intelligent-Tiering | 10 PB data estate | 40-60% storage cost reduction |
+| Spot Instances for Glue | Non-critical ETL jobs | 60% compute savings |
+| Reserved Capacity | Neptune, OpenSearch | 30-40% vs on-demand |
+| Lambda Graviton2 (ARM) | All functions | 20% cost + 34% performance |
+| Athena query caching | Repeated analytical queries | 50% reduction in scans |
+| DynamoDB on-demand | Low-traffic tables | Pay only for actual usage |
