@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mxfile host="app.diagrams.net" modified="2024-01-15T00:00:00.000Z" agent="Kiro" version="22.1.0">
+  <diagram name="System Architecture - 3 Lanes" id="system-arch">
+    <mxGraphModel dx="1422" dy="762" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="1200" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="lane1" value="LANE 1: TRANSACTIONAL TRADING" style="swimlane;startSize=30;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1;fontSize=14;" vertex="1" parent="1">
+          <mxGeometry x="20" y="20" width="1560" height="280" as="geometry" />
+        </mxCell>
+        <mxCell id="bloomberg" value="Bloomberg&#10;B-Pipe" style="shape=hexagon;perimeter=hexagonPerimeter2;whiteSpace=wrap;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="lane1">
+          <mxGeometry x="30" y="50" width="120" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="reuters" value="Thomson&#10;Reuters" style="shape=hexagon;perimeter=hexagonPerimeter2;whiteSpace=wrap;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="lane1">
+          <mxGeometry x="30" y="140" width="120" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="kinesis" value="Kinesis Data Streams&#10;16 shards | 12K/sec burst&#10;ON_DEMAND | 7-day retention" style="rounded=1;whiteSpace=wrap;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1;" vertex="1" parent="lane1">
+          <mxGeometry x="200" y="60" width="200" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="apigw" value="API Gateway&#10;HTTP + WebSocket&#10;Cognito JWT | 10K/sec" style="rounded=1;whiteSpace=wrap;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1;" vertex="1" parent="lane1">
+          <mxGeometry x="200" y="160" width="200" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="lambda_md" value="Lambda: MarketData&#10;Reserved: 2000" style="rounded=1;whiteSpace=wrap;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="lane1">
+          <mxGeometry x="460" y="50" width="150" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="lambda_om" value="Lambda: OrderManager&#10;Reserved: 1000 | Idempotent" style="rounded=1;whiteSpace=wrap;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="lane1">
+          <mxGeometry x="460" y="120" width="180" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="lambda_ws" value="Lambda: WalletService&#10;Portfolio + Margin" style="rounded=1;whiteSpace=wrap;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="lane1">
+          <mxGeometry x="460" y="190" width="150" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="lambda_aa" value="Lambda: AdvisoryAgent&#10;Reserved: 500 | RL &lt;500ms" style="rounded=1;whiteSpace=wrap;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="lane1">
+          <mxGeometry x="680" y="120" width="170" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="aurora" value="Aurora PostgreSQL&#10;Multi-AZ | Serverless v2&#10;ACID LEDGER TRUTH" style="shape=cylinder3;whiteSpace=wrap;boundedLbl=1;fillColor=#f8cecc;strokeColor=#b85450;fontStyle=1;" vertex="1" parent="lane1">
+          <mxGeometry x="920" y="40" width="160" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="dynamodb" value="DynamoDB&#10;Idempotency | Orders&#10;Outbox | Portfolio" style="shape=cylinder3;whiteSpace=wrap;boundedLbl=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="lane1">
+          <mxGeometry x="920" y="150" width="160" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="cognito" value="Cognito&#10;MFA + JWT&#10;RBAC Groups" style="rounded=1;whiteSpace=wrap;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="lane1">
+          <mxGeometry x="1140" y="80" width="120" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="e1" edge="1" source="bloomberg" target="kinesis" parent="lane1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e2" edge="1" source="reuters" target="kinesis" parent="lane1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e3" edge="1" source="kinesis" target="lambda_md" parent="lane1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e4" edge="1" source="apigw" target="lambda_om" parent="lane1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e5" edge="1" source="apigw" target="lambda_ws" parent="lane1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e6" edge="1" source="apigw" target="lambda_aa" parent="lane1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e7" edge="1" source="lambda_om" target="aurora" parent="lane1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e8" edge="1" source="lambda_om" target="dynamodb" parent="lane1"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <mxCell id="lane2" value="LANE 2: EVENT + LAKEHOUSE" style="swimlane;startSize=30;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;fontSize=14;" vertex="1" parent="1">
+          <mxGeometry x="20" y="320" width="1560" height="300" as="geometry" />
+        </mxCell>
+        <mxCell id="eventbridge" value="EventBridge&#10;5 event types&#10;Schema Registry" style="rounded=1;whiteSpace=wrap;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;" vertex="1" parent="lane2">
+          <mxGeometry x="30" y="50" width="150" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="sqs" value="SQS FIFO&#10;trade-processing&#10;Exactly-once" style="rounded=1;whiteSpace=wrap;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="lane2">
+          <mxGeometry x="30" y="150" width="130" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="stepfn" value="Step Functions&#10;Orchestrator&#10;7 states | 3x retry" style="rounded=1;whiteSpace=wrap;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;" vertex="1" parent="lane2">
+          <mxGeometry x="230" y="50" width="160" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="s3b" value="S3 BRONZE&#10;Raw | Immutable&#10;Object Lock&#10;Hive Partitioned" style="shape=cylinder3;whiteSpace=wrap;boundedLbl=1;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;" vertex="1" parent="lane2">
+          <mxGeometry x="450" y="40" width="140" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="glue" value="Glue PySpark&#10;G.2X | 10-100 DPUs&#10;Auto-scaling | Spot" style="rounded=1;whiteSpace=wrap;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="lane2">
+          <mxGeometry x="450" y="160" width="140" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="s3s" value="S3 SILVER&#10;Parquet/Snappy&#10;Validated&#10;Deduplicated" style="shape=cylinder3;whiteSpace=wrap;boundedLbl=1;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;" vertex="1" parent="lane2">
+          <mxGeometry x="650" y="40" width="140" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="s3g" value="S3 GOLD&#10;Aggregated&#10;Trade Summaries&#10;Portfolios | Risk | Perf" style="shape=cylinder3;whiteSpace=wrap;boundedLbl=1;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;" vertex="1" parent="lane2">
+          <mxGeometry x="850" y="40" width="150" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="catalog" value="Glue Catalog&#10;+ Lake Formation&#10;PII Column Security" style="rounded=1;whiteSpace=wrap;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="lane2">
+          <mxGeometry x="650" y="170" width="150" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="dms" value="DMS CDC&#10;Aurora → S3&#10;&lt; 30s latency" style="rounded=1;whiteSpace=wrap;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="lane2">
+          <mxGeometry x="1080" y="50" width="130" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="dq" value="Data Quality&#10;Framework&#10;HIGH/LOW severity" style="rounded=1;whiteSpace=wrap;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="lane2">
+          <mxGeometry x="850" y="170" width="140" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="e10" edge="1" source="eventbridge" target="stepfn" parent="lane2"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e11" edge="1" source="stepfn" target="s3b" parent="lane2"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e12" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="s3b" target="s3s" parent="lane2"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e13" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="s3s" target="s3g" parent="lane2"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e14" edge="1" source="glue" target="s3s" parent="lane2"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <mxCell id="lane3" value="LANE 3: ML + CONSUMPTION" style="swimlane;startSize=30;fillColor=#fff2cc;strokeColor=#d6b656;fontStyle=1;fontSize=14;" vertex="1" parent="1">
+          <mxGeometry x="20" y="640" width="1560" height="260" as="geometry" />
+        </mxCell>
+        <mxCell id="opensearch" value="OpenSearch&#10;3 master + 6 data&#10;UltraWarm&#10;ISM: hot/warm/cold/7yr" style="shape=cylinder3;whiteSpace=wrap;boundedLbl=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="lane3">
+          <mxGeometry x="30" y="50" width="160" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="neptune" value="Neptune Graph&#10;1W + 2R (r6g.2xl)&#10;Gremlin | Fraud&#10;Auto-scale 70% CPU" style="shape=cylinder3;whiteSpace=wrap;boundedLbl=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="lane3">
+          <mxGeometry x="240" y="50" width="160" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="athena" value="Athena SQL&#10;3 Workgroups&#10;1TB/query | 10TB/day&#10;Named Queries" style="rounded=1;whiteSpace=wrap;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="lane3">
+          <mxGeometry x="450" y="60" width="140" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="sm_train" value="SageMaker Training&#10;PPO RL (ml.p3.2xl)&#10;4-step Pipeline&#10;Weekly Schedule" style="rounded=1;whiteSpace=wrap;fillColor=#fff2cc;strokeColor=#d6b656;fontStyle=1;" vertex="1" parent="lane3">
+          <mxGeometry x="640" y="50" width="160" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="registry" value="Model Registry&#10;+ Governance Gate&#10;Bias | Fairness | SHAP" style="rounded=1;whiteSpace=wrap;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="lane3">
+          <mxGeometry x="850" y="50" width="160" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="sm_ep" value="SageMaker Endpoint&#10;A/B (90/10)&#10;&lt; 500ms | Scale 1-10" style="rounded=1;whiteSpace=wrap;fillColor=#fff2cc;strokeColor=#d6b656;fontStyle=1;" vertex="1" parent="lane3">
+          <mxGeometry x="1060" y="50" width="160" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="reg_store" value="Regulatory Store&#10;S3 COMPLIANCE Lock&#10;7-yr FINRA 4511" style="shape=cylinder3;whiteSpace=wrap;boundedLbl=1;fillColor=#f8cecc;strokeColor=#b85450;fontStyle=1;" vertex="1" parent="lane3">
+          <mxGeometry x="1280" y="50" width="150" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="e15" edge="1" source="sm_train" target="registry" parent="lane3"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e16" edge="1" source="registry" target="sm_ep" parent="lane3"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e17" edge="1" source="sm_ep" target="reg_store" parent="lane3"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <mxCell id="crosscut" value="CROSS-CUTTING: KMS (4 CMKs) | IAM Least-Privilege | GuardDuty | SecurityHub | CloudTrail | Organizations (100+ accounts) | Transit Gateway | CloudWatch (9 alarms) | X-Ray | SSM Runbooks | CRR DR (us-west-2) | CI/CD" style="swimlane;startSize=30;fillColor=#f8cecc;strokeColor=#b85450;fontStyle=1;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="20" y="920" width="1560" height="60" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
