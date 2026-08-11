@@ -3006,3 +3006,367 @@ Non-retryable: ValidationError, InsufficientMarginError, DataQualityAbortError
 | Neptune graph query | < 5s (4 hops) | Auto-scale readers at 70% CPU |
 | OpenSearch search | < 1s (P95) | 6 data nodes + UltraWarm offload |
 
+
+
+---
+
+## Error Handling & Observability Strategy
+
+### Error Handling Philosophy
+
+> "Every error is either **retryable** (transient) or **terminal** (permanent). Retryable errors get exponential backoff. Terminal errors get immediate DLQ routing, structured logging, and alerting. No error is ever swallowed silently."
+
+### Error Classification Matrix
+
+| Error Type | Category | Action | Example |
+|-----------|----------|--------|---------|
+| ConnectionError | Retryable | Backoff + retry (3x) | Network timeout to Aurora |
+| TimeoutError | Retryable | Backoff + retry (3x) | SageMaker >500ms |
+| ThrottlingException | Retryable | Backoff + retry (3x) | DynamoDB/Kinesis throttle |
+| ValidationError | Terminal | Return 400 + log | Invalid order fields |
+| InsufficientMarginError | Terminal | Return 422 + log | Not enough funds |
+| InstrumentNotFoundError | Terminal | Return 404 + log | Bad ISIN/CUSIP |
+| DataQualityAbortError | Terminal | Halt pipeline + DLQ + alert | >30% records fail quality |
+| SchemaValidationError | Terminal (per record) | DLQ + continue batch | Malformed market data |
+| CircuitOpenError | Terminal (temporary) | Return 503 + Retry-After | Downstream service down |
+
+### Error Handling Per Layer
+
+#### 1. API Gateway Layer (HTTP Errors)
+
+```python
+# Structured error response contract (all endpoints)
+{
+    "error": "ErrorType",           # Machine-readable error code
+    "message": "Human description", # Safe for client display (no internals)
+    "correlation_id": "uuid",       # For distributed tracing
+    "retry_after": 5,               # Seconds (if retryable, e.g., 429/503)
+    "details": [...]                # Field-level validation errors (400 only)
+}
+
+# HTTP status code mapping:
+#   400 - ValidationError (bad input)
+#   401 - JWT auth failure (expired/invalid token)
+#   404 - Resource not found (order, instrument)
+#   422 - Business rule violation (margin, position limit)
+#   429 - Rate limit exceeded (Retry-After header)
+#   500 - Unhandled internal error (alarm fires)
+#   502 - Upstream service error (Aurora/SageMaker down)
+#   503 - Circuit open (Retry-After header)
+#   504 - Timeout (SageMaker >500ms, Aurora >30s)
+```
+
+#### 2. Database Layer (Aurora PostgreSQL)
+
+```python
+# Aurora error handling with connection pooling awareness
+try:
+    async with conn.transaction():
+        # ACID operations...
+except asyncpg.UniqueViolationError:
+    # Idempotency key collision → return cached response (not an error)
+    return get_cached_response(idempotency_key)
+except asyncpg.ForeignKeyViolationError:
+    # Data integrity issue → terminal, return 422
+    raise BusinessRuleError("Referenced entity does not exist")
+except asyncpg.ConnectionDoesNotExistError:
+    # Connection pool exhausted → retryable with circuit breaker
+    circuit_breaker.record_failure(error)
+    raise RetryableError("Database connection unavailable")
+except asyncpg.DeadlockDetectedError:
+    # Transaction deadlock → automatic retry (up to 3x)
+    raise RetryableError("Transaction conflict, retrying")
+except asyncpg.QueryCanceledError:
+    # Query timeout (>30s) → log and alert
+    logger.error("Query timeout", query_id=query_id, duration_ms=elapsed)
+    raise TimeoutError("Database query exceeded timeout")
+```
+
+#### 3. Kinesis / Streaming Layer (Message Processing)
+
+```python
+# Batch processing with partial failure reporting
+# Lambda returns batchItemFailures — only failed records are retried
+
+def lambda_handler(event, context):
+    batch_item_failures = []
+    
+    for record in event['Records']:
+        try:
+            process_record(record)
+        except SchemaValidationError as e:
+            # Terminal per-record: route to DLQ, don't retry
+            send_to_dlq(record, error=e)
+            emit_error_event(e)
+            # Do NOT add to batchItemFailures (don't retry malformed data)
+        except (ConnectionError, TimeoutError) as e:
+            # Retryable: add to failures → Kinesis will retry this record
+            batch_item_failures.append({
+                "itemIdentifier": record['kinesis']['sequenceNumber']
+            })
+        except Exception as e:
+            # Unknown error: log, DLQ, don't retry (prevent poison pill)
+            logger.exception("Unexpected error", record_id=record_id)
+            send_to_dlq(record, error=e)
+    
+    return {"batchItemFailures": batch_item_failures}
+
+# Kinesis event source mapping config:
+#   bisect_batch_on_function_error = true  (split batch to isolate bad record)
+#   maximum_retry_attempts = 3             (don't retry forever)
+#   maximum_record_age_in_seconds = 86400  (skip records older than 24h)
+#   on_failure → DLQ destination           (capture unprocessable records)
+```
+
+#### 4. SQS / EventBridge Layer (Async Messaging)
+
+```python
+# SQS FIFO with exactly-once + DLQ after maxReceiveCount
+
+# Message processing:
+#   - Success → message deleted from queue
+#   - Failure → visibility timeout expires → message reappears
+#   - After maxReceiveCount (5) failures → message moves to DLQ
+#   - DLQ Processor: emit alert + metric + pipeline.failed event
+
+# EventBridge delivery failure:
+#   - Target unavailable → retry with exponential backoff (built-in)
+#   - After exhaustion → message goes to EventBridge DLQ (SQS)
+#   - CloudWatch alarm on DLQ depth > 0
+```
+
+#### 5. ETL Layer (Glue PySpark)
+
+```python
+# ETL error handling with data quality gates
+
+class BronzeToSilverETL:
+    def run(self):
+        for attempt in range(1, MAX_RETRIES + 1):
+            try:
+                raw = self.extract()           # May fail: S3 access, partition not found
+                valid, rejected = self.validate_schema(raw)  # Never fails, splits data
+                deduped = self.deduplicate(valid)             # Never fails, reduces data
+                passed, failed = self.apply_data_quality(deduped)  # May ABORT if >30%
+                self.write_silver(passed)      # May fail: S3, KMS, disk
+                self.write_lineage(...)        # Non-critical, log if fails
+                self.emit_success_event()      # Non-critical, log if fails
+                return  # SUCCESS
+                
+            except DataQualityAbortError as e:
+                # NON-RETRYABLE: Bad data, not infrastructure
+                self.emit_failure_event(e, attempt)
+                raise  # Don't retry, escalate immediately
+                
+            except Exception as e:
+                # RETRYABLE: Infrastructure issue
+                if attempt < MAX_RETRIES:
+                    backoff = 30 * (2 ** (attempt - 1))  # 30s, 60s, 120s
+                    time.sleep(backoff)
+                else:
+                    self.emit_failure_event(e, attempt)
+                    raise  # All retries exhausted → Step Functions catches
+```
+
+#### 6. ML/SageMaker Layer
+
+```python
+# SageMaker inference with timeout enforcement + graceful degradation
+
+def invoke_sagemaker(profile):
+    start = time.time()
+    try:
+        response = sagemaker_runtime.invoke_endpoint(
+            EndpointName=endpoint_name,
+            ContentType='application/json',
+            Body=json.dumps(profile.to_features())
+        )
+    except sagemaker_runtime.exceptions.ModelError as e:
+        # Model crashed → circuit breaker + alert
+        circuit_breaker.record_failure(e)
+        raise InternalServerError("Model inference failed")
+    except ClientError as e:
+        if e.response['Error']['Code'] == 'ThrottlingException':
+            # Throttled → retryable
+            raise RetryableError("SageMaker throttled")
+        raise
+    
+    elapsed_ms = (time.time() - start) * 1000
+    if elapsed_ms > 500:
+        # SLA violation → log warning, still return result but alert
+        logger.warning("SageMaker SLA breach", elapsed_ms=elapsed_ms)
+        metrics.add_metric("SageMakerSLABreach", 1)
+    
+    return parse_response(response)
+```
+
+---
+
+## Logging & Observability Architecture
+
+### Structured Logging Standard (All Services)
+
+```python
+# Every log entry includes these fields (via Lambda Powertools):
+{
+    "level": "INFO|WARNING|ERROR",
+    "timestamp": "2024-01-15T10:30:00.123Z",
+    "service": "order-manager",                # Which microservice
+    "function_name": "verticalbroker-prod-order-manager",
+    "correlation_id": "abc-123-def-456",       # Traces across services
+    "request_id": "lambda-request-id",         # Lambda invocation ID
+    "xray_trace_id": "1-abc-def",              # X-Ray trace for distributed tracing
+    "cold_start": false,                       # Lambda cold start indicator
+    
+    # Business context (varies per service):
+    "order_id": "uuid",
+    "client_id": "client-123",                 # Never log PII (name, SSN, account#)
+    "instrument_id": "US0378331005",
+    "action": "submit_order",
+    "outcome": "ACCEPTED|REJECTED|ERROR",
+    "duration_ms": 45,
+    
+    # Error context (when applicable):
+    "error_type": "InsufficientMarginError",
+    "error_message": "Required 50000, available 30000",
+    "stack_trace": "..."                       # Only in ERROR level
+}
+```
+
+### What We Log vs What We DON'T Log
+
+| ✅ DO LOG | ❌ NEVER LOG |
+|-----------|-------------|
+| correlation_id, request_id | Client name, SSN, DOB |
+| order_id, instrument_id | Account numbers, passwords |
+| Error type + safe message | Raw SQL queries with data |
+| Duration (ms), record counts | JWT tokens, API keys |
+| Status codes, retry counts | Full request/response bodies with PII |
+| DLQ routing reason | Credit card numbers |
+
+### Observability Layers
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    OBSERVABILITY STACK                            │
+│                                                                   │
+│  ┌─────────────────┐  ┌──────────────────┐  ┌───────────────┐  │
+│  │    METRICS       │  │     LOGS          │  │    TRACES     │  │
+│  │  (CloudWatch)    │  │ (CloudWatch Logs) │  │   (X-Ray)     │  │
+│  │                  │  │                   │  │               │  │
+│  │ - Invocations    │  │ - Structured JSON │  │ - 5% normal   │  │
+│  │ - Errors         │  │ - 90-day retention│  │ - 100% errors │  │
+│  │ - Duration       │  │ - Insights queries│  │ - 10% trades  │  │
+│  │ - Throttles      │  │ - Metric filters  │  │               │  │
+│  │ - Custom EMF     │  │ - Subscription    │  │ - Service map │  │
+│  │   metrics        │  │   filters         │  │ - Latency     │  │
+│  │                  │  │                   │  │   breakdown   │  │
+│  └────────┬─────────┘  └────────┬──────────┘  └──────┬────────┘  │
+│           │                      │                     │          │
+│           ▼                      ▼                     ▼          │
+│  ┌─────────────────────────────────────────────────────────────┐ │
+│  │              ALARMS + DASHBOARDS + AUTOMATION                 │ │
+│  │  9 Alarms → SNS (PagerDuty) → SSM Runbooks (auto-heal)      │ │
+│  │  3 Composite Alarms → cascade failure detection              │ │
+│  │  5 Dashboards → pipeline health, API, cost, security, ML    │ │
+│  └─────────────────────────────────────────────────────────────┘ │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Custom Metrics (CloudWatch EMF via Lambda Powertools)
+
+| Service | Custom Metric | Unit | Purpose |
+|---------|--------------|------|---------|
+| Market Data | RecordsWritten | Count | Throughput tracking |
+| Market Data | MalformedRecords | Count | Data quality signal |
+| Market Data | MicroBatchSizeBytes | Bytes | Batch efficiency |
+| Order Manager | OrderAccepted / OrderRejected | Count | Conversion rate |
+| Order Manager | TradeEventEmitted | Count | Event reliability |
+| Wallet Service | PositionUpdated | Count | Processing rate |
+| Wallet Service | MarginCheckPerformed | Count | Validation load |
+| Advisory Agent | RecommendationGenerated | Count | ML utilization |
+| Advisory Agent | HumanReviewFlagged | Count | Governance trigger rate |
+| Advisory Agent | SageMakerLatencyMs | Milliseconds | SLA compliance |
+| Advisory Agent | ConfidenceScore | None | Model quality signal |
+| DLQ Processor | DeadLetteredMessages | Count | Failure rate |
+| ETL | ProcessingDurationSeconds | Seconds | Pipeline SLA |
+| ETL | RecordsInput/Output/Rejected | Count | Data flow health |
+
+### Distributed Tracing (X-Ray)
+
+```
+Client Request → API Gateway → Lambda (Order Manager) → Aurora → DynamoDB → EventBridge
+     │              │              │                       │          │           │
+     │         [trace start]  [subsegment]           [subsegment] [subsegment] [subsegment]
+     │                                                                           │
+     │                                                        ┌──────────────────┘
+     │                                                        ▼
+     │                                               SQS FIFO → Lambda (Wallet) → DynamoDB
+     │                                                              [new trace segment]
+     │
+     └── correlation_id links all traces across async boundaries
+```
+
+**Sampling Rules**:
+- Normal traffic: 5% sampled (cost-effective for high volume)
+- Error paths: 100% sampled (never miss a failure trace)
+- Trade paths (/v1/orders): 10% sampled (critical path visibility)
+
+### Log-Based Alerting (Metric Filters)
+
+```hcl
+# CloudTrail metric filters for security detection (<60s)
+# These create CloudWatch metrics from log patterns:
+
+# 1. Unauthorized API calls → alarm if 5+ in 60s
+filter_pattern = "{ ($.errorCode = \"*UnauthorizedOperation\") || ($.errorCode = \"AccessDenied*\") }"
+
+# 2. S3 data exfiltration → alarm if 100+ external GetObject in 60s  
+filter_pattern = "{ ($.eventSource = \"s3.amazonaws.com\") && ($.eventName = \"GetObject\") && ($.sourceIPAddress != \"*.amazonaws.com\") }"
+
+# 3. IAM policy changes → alarm on ANY change (privilege escalation)
+filter_pattern = "{ ($.eventName = \"PutRolePolicy\") || ($.eventName = \"AttachRolePolicy\") || ... }"
+```
+
+### Correlation ID Propagation
+
+```
+API Gateway → Lambda → EventBridge → SQS → Lambda → DynamoDB
+    │             │          │          │       │
+    └─ X-Request-ID header propagated as correlation_id through all services
+    
+How it works:
+1. API Gateway generates X-Request-ID (or uses client-provided)
+2. Lambda Powertools injects as correlation_id into Logger
+3. EventBridge events include correlation_id in detail payload
+4. SQS messages carry correlation_id in message attributes
+5. Downstream Lambda extracts and sets correlation_id in its Logger
+6. CloudWatch Logs Insights: query by correlation_id across ALL log groups
+```
+
+### Observability Queries (CloudWatch Logs Insights)
+
+```sql
+-- Find all logs for a specific failed order (across all services)
+fields @timestamp, @message, service, correlation_id, error_type
+| filter correlation_id = "abc-123-def-456"
+| sort @timestamp asc
+
+-- Top errors in the last hour
+fields service, error_type, @message
+| filter level = "ERROR"
+| stats count(*) as error_count by service, error_type
+| sort error_count desc
+| limit 20
+
+-- P99 latency by service
+fields service, duration_ms
+| stats percentile(duration_ms, 99) as p99_ms by service
+
+-- DLQ message analysis
+fields original_queue, failure_reason, retry_count
+| filter @logStream like "dlq-processor"
+| stats count(*) by original_queue, failure_reason
+| sort count desc
+```
+
