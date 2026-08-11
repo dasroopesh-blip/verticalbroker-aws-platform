@@ -2494,3 +2494,209 @@ class TestAlarmConfiguration:
 | Lambda Graviton2 (ARM) | All functions | 20% cost + 34% performance |
 | Athena query caching | Repeated analytical queries | 50% reduction in scans |
 | DynamoDB on-demand | Low-traffic tables | Pay only for actual usage |
+
+
+---
+
+## Aurora PostgreSQL — Transactional Ledger (ACID Source of Truth)
+
+### High-Level Design
+
+Aurora PostgreSQL Multi-AZ serves as the **single source of truth** for all transactional trading data. It is the strongly-consistent write path that:
+- Processes all order submissions (INSERT into orders table)
+- Manages wallet/account balances (UPDATE with transaction isolation)
+- Records trade executions (INSERT with foreign key integrity)
+- Provides the source for DMS CDC pipeline to the data lake
+
+```mermaid
+graph LR
+    subgraph "Transactional Path (Strong Consistency)"
+        OM[Order Manager Lambda] --> AURORA[(Aurora PostgreSQL<br/>Multi-AZ Serverless v2<br/>ACID Ledger Truth)]
+        WS[Wallet Service Lambda] --> AURORA
+        AURORA --> DMS[DMS CDC<br/>< 30s latency]
+        DMS --> S3B[(S3 Bronze<br/>Data Lake)]
+    end
+    
+    subgraph "Operational Cache (Eventually Consistent)"
+        OM --> DDB[(DynamoDB<br/>Idempotency + Outbox)]
+        WS --> DDB2[(DynamoDB<br/>Portfolio Cache)]
+    end
+```
+
+**Design Decision**: Aurora PostgreSQL is chosen over DynamoDB as the ledger because:
+1. Multi-table ACID transactions (order + wallet + position in one commit)
+2. SQL JOINs for reconciliation and regulatory reporting
+3. Logical replication (CDC) for clean downstream decoupling
+4. FINRA requires auditable, relational transaction history
+5. Foreign key constraints enforce data integrity at the database level
+
+### Low-Level Design
+
+#### Aurora Cluster Configuration
+
+| Parameter | Value | Rationale |
+|-----------|-------|-----------|
+| Engine | Aurora PostgreSQL 15.4 | Latest LTS with logical replication |
+| Mode | Serverless v2 | Auto-scales 2-64 ACUs based on trading load |
+| Topology | 1 Writer + 2 Readers | Writer for orders, readers for portfolio queries |
+| Storage | I/O Optimized (aurora-iopt1) | High-throughput trading workload |
+| Encryption | KMS CMK (Restricted) | FINRA compliance |
+| Backup | 35-day retention | Maximum PITR window |
+| Networking | Private subnets only | No public access |
+| Access | Lambda (5432) + DMS (5432) | Security group restricted |
+
+#### Database Schema (Trading Schema)
+
+```sql
+-- Core trading tables in Aurora PostgreSQL
+CREATE SCHEMA trading;
+
+CREATE TABLE trading.orders (
+    order_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    client_id VARCHAR(64) NOT NULL,
+    account_id VARCHAR(64) NOT NULL,
+    instrument_id VARCHAR(12) NOT NULL,  -- ISIN
+    order_type VARCHAR(10) NOT NULL,     -- MARKET|LIMIT|STOP|STOP_LIMIT
+    side VARCHAR(4) NOT NULL,            -- BUY|SELL
+    quantity NUMERIC(20,6) NOT NULL CHECK (quantity > 0),
+    limit_price NUMERIC(20,8),
+    stop_price NUMERIC(20,8),
+    time_in_force VARCHAR(3) NOT NULL,   -- DAY|GTC|IOC|FOK
+    status VARCHAR(10) NOT NULL DEFAULT 'PENDING',
+    executed_price NUMERIC(20,8),
+    executed_quantity NUMERIC(20,6),
+    idempotency_key VARCHAR(128) UNIQUE NOT NULL,
+    correlation_id VARCHAR(64),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE trading.wallets (
+    account_id VARCHAR(64) NOT NULL,
+    client_id VARCHAR(64) NOT NULL,
+    cash_balance NUMERIC(20,8) NOT NULL DEFAULT 0,
+    margin_available NUMERIC(20,8) NOT NULL DEFAULT 0,
+    total_value NUMERIC(20,8) NOT NULL DEFAULT 0,
+    last_updated TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (account_id, client_id)
+);
+
+CREATE TABLE trading.positions (
+    account_id VARCHAR(64) NOT NULL,
+    instrument_id VARCHAR(12) NOT NULL,
+    quantity NUMERIC(20,6) NOT NULL DEFAULT 0,
+    avg_cost_basis NUMERIC(20,8) NOT NULL DEFAULT 0,
+    market_value NUMERIC(20,8) NOT NULL DEFAULT 0,
+    unrealized_pnl NUMERIC(20,8) NOT NULL DEFAULT 0,
+    last_updated TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (account_id, instrument_id)
+);
+
+CREATE TABLE trading.trade_executions (
+    trade_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    order_id UUID NOT NULL REFERENCES trading.orders(order_id),
+    client_id VARCHAR(64) NOT NULL,
+    account_id VARCHAR(64) NOT NULL,
+    instrument_id VARCHAR(12) NOT NULL,
+    side VARCHAR(4) NOT NULL,
+    quantity NUMERIC(20,6) NOT NULL,
+    executed_price NUMERIC(20,8) NOT NULL,
+    total_value NUMERIC(20,8) NOT NULL,
+    fees NUMERIC(20,8) NOT NULL DEFAULT 0,
+    venue VARCHAR(64),
+    execution_timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    settlement_date DATE NOT NULL
+);
+
+-- Indexes for CDC and query performance
+CREATE INDEX idx_orders_client ON trading.orders(client_id, created_at DESC);
+CREATE INDEX idx_orders_status ON trading.orders(status, created_at);
+CREATE INDEX idx_positions_account ON trading.positions(account_id);
+CREATE INDEX idx_executions_client ON trading.trade_executions(client_id, execution_timestamp DESC);
+CREATE INDEX idx_executions_instrument ON trading.trade_executions(instrument_id, execution_timestamp DESC);
+
+-- Enable logical replication for DMS CDC
+ALTER SYSTEM SET wal_level = 'logical';
+ALTER SYSTEM SET max_replication_slots = 10;
+ALTER SYSTEM SET max_wal_senders = 10;
+```
+
+#### Transaction Pattern (Order Execution)
+
+```python
+# Atomic order execution in Aurora PostgreSQL
+# This runs as a single ACID transaction — all succeed or all fail
+async def execute_order_transaction(conn, order: OrderRequest) -> TradeExecution:
+    """Execute order with full ACID guarantees across multiple tables."""
+    async with conn.transaction():
+        # 1. Check and reserve margin (SELECT FOR UPDATE — locks wallet row)
+        wallet = await conn.fetchrow(
+            "SELECT cash_balance, margin_available FROM trading.wallets "
+            "WHERE account_id = $1 AND client_id = $2 FOR UPDATE",
+            order.account_id, order.client_id
+        )
+        required_margin = order.quantity * order.limit_price * Decimal("0.5")
+        if wallet['margin_available'] < required_margin:
+            raise InsufficientMarginError(...)
+
+        # 2. Insert order record
+        order_id = await conn.fetchval(
+            "INSERT INTO trading.orders (client_id, account_id, instrument_id, "
+            "order_type, side, quantity, limit_price, time_in_force, status, "
+            "idempotency_key) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'EXECUTED',$9) "
+            "RETURNING order_id",
+            order.client_id, order.account_id, order.instrument_id,
+            order.order_type, order.side, order.quantity,
+            order.limit_price, order.time_in_force, order.idempotency_key
+        )
+
+        # 3. Insert trade execution
+        trade_id = await conn.fetchval(
+            "INSERT INTO trading.trade_executions (order_id, client_id, "
+            "account_id, instrument_id, side, quantity, executed_price, "
+            "total_value, fees, venue, settlement_date) "
+            "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING trade_id",
+            order_id, order.client_id, order.account_id,
+            order.instrument_id, order.side, order.quantity,
+            order.limit_price, order.quantity * order.limit_price,
+            Decimal("0"), "NYSE", date.today() + timedelta(days=1)
+        )
+
+        # 4. Update position (upsert)
+        await conn.execute(
+            "INSERT INTO trading.positions (account_id, instrument_id, quantity, avg_cost_basis) "
+            "VALUES ($1, $2, $3, $4) "
+            "ON CONFLICT (account_id, instrument_id) DO UPDATE SET "
+            "quantity = positions.quantity + $3, "
+            "avg_cost_basis = (positions.quantity * positions.avg_cost_basis + $3 * $4) "
+            "/ (positions.quantity + $3), "
+            "last_updated = NOW()",
+            order.account_id, order.instrument_id, order.quantity, order.limit_price
+        )
+
+        # 5. Debit wallet
+        await conn.execute(
+            "UPDATE trading.wallets SET "
+            "cash_balance = cash_balance - $1, "
+            "margin_available = margin_available - $2, "
+            "last_updated = NOW() "
+            "WHERE account_id = $3 AND client_id = $4",
+            order.quantity * order.limit_price, required_margin,
+            order.account_id, order.client_id
+        )
+
+        # All 5 operations commit atomically — or all roll back
+        return TradeExecution(trade_id=trade_id, order_id=order_id, ...)
+```
+
+### Consistency, Failure, and Recovery
+
+| Capability | Aurora PostgreSQL Role |
+|-----------|----------------------|
+| Order + wallet ledger | Strong consistency, ACID transactions, foreign keys |
+| Idempotency | UNIQUE constraint on idempotency_key (database-level dedup) |
+| Reconciliation | SQL JOINs across orders, executions, positions, wallets |
+| CDC to data lake | Logical replication → DMS → S3 Bronze (< 30s latency) |
+| Recovery | RTO 5-15 min via Aurora failover; RPO near-zero (synchronous) |
+| Regulatory audit | Full transaction history with timestamps for FINRA |
+
