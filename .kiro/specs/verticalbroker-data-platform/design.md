@@ -2700,3 +2700,309 @@ async def execute_order_transaction(conn, order: OrderRequest) -> TradeExecution
 | Recovery | RTO 5-15 min via Aurora failover; RPO near-zero (synchronous) |
 | Regulatory audit | Full transaction history with timestamps for FINRA |
 
+
+
+---
+
+## Microservices Architecture & Design Patterns
+
+### Service Inventory (7 Bounded Contexts)
+
+| # | Service | Domain | Database | Communication |
+|---|---------|--------|----------|---------------|
+| 1 | Market Data Processor | Ingestion | S3 Bronze (own), Glue Catalog | Kinesis consumer → EventBridge producer |
+| 2 | Order Manager | Trading | Aurora (orders, executions) + DynamoDB (outbox) | API Gateway → EventBridge producer |
+| 3 | Wallet Service | Portfolio | Aurora (wallets, positions) + DynamoDB (cache) | SQS FIFO consumer + API Gateway |
+| 4 | Advisory Agent | Recommendations | SageMaker Endpoint + S3 Regulatory Store | API Gateway → EventBridge producer |
+| 5 | DLQ Processor | Error Recovery | EventBridge + CloudWatch | SQS consumer → EventBridge producer |
+| 6 | Outbox Publisher | Event Reliability | DynamoDB Streams → EventBridge | Stream consumer |
+| 7 | CDC Schema Evolution | Data Integration | Glue Catalog | EventBridge event mediator |
+
+### Domain-Driven Design (Bounded Contexts)
+
+```mermaid
+graph TB
+    subgraph "Trading Domain (Order Manager)"
+        OM[Order Manager Lambda]
+        OM_DB[(Aurora: orders + executions)]
+        OM_OUTBOX[(DynamoDB: OrderOutbox)]
+        OM --> OM_DB
+        OM --> OM_OUTBOX
+    end
+
+    subgraph "Portfolio Domain (Wallet Service)"
+        WS[Wallet Service Lambda]
+        WS_DB[(Aurora: wallets + positions)]
+        WS_CACHE[(DynamoDB: Portfolio Cache)]
+        WS --> WS_DB
+        WS --> WS_CACHE
+    end
+
+    subgraph "Advisory Domain (Advisory Agent)"
+        AA[Advisory Agent Lambda]
+        AA_ML[SageMaker Endpoint]
+        AA_REG[(S3 Regulatory Store)]
+        AA --> AA_ML
+        AA --> AA_REG
+    end
+
+    subgraph "Ingestion Domain (Market Data)"
+        MD[Market Data Processor]
+        MD_S3[(S3 Bronze Layer)]
+        MD --> MD_S3
+    end
+
+    subgraph "Event Backbone"
+        EB[EventBridge Bus]
+        SQS[SQS FIFO]
+    end
+
+    OM_OUTBOX -.->|DynamoDB Stream| EB
+    EB -->|trade.executed| SQS
+    SQS --> WS
+    EB -->|data.ingested| SF[Step Functions]
+```
+
+**Key principle**: Each domain owns its data. Services never directly query another service's database. All cross-domain communication happens through domain events.
+
+**Exception**: Order Manager and Wallet Service share the Aurora cluster (same `trading` schema) because order execution requires ACID transactions across orders + wallets + positions in a single commit. Splitting into separate databases would require distributed transactions (2PC/Saga), which is inappropriate for financial ledger integrity.
+
+---
+
+## SOLID Principles Applied
+
+### Single Responsibility Principle (SRP)
+
+| Service | Single Responsibility |
+|---------|----------------------|
+| Market Data Processor | ONLY ingests and validates market data → writes to Bronze |
+| Order Manager | ONLY handles order lifecycle (submit, validate, execute) |
+| Wallet Service | ONLY manages portfolio state (positions, cash, margin) |
+| Advisory Agent | ONLY generates recommendations via ML model |
+| Outbox Publisher | ONLY reads DynamoDB Stream and publishes to EventBridge |
+| DLQ Processor | ONLY processes dead-lettered messages (alerts + metrics) |
+
+Each Lambda function does ONE thing. No service handles both ingestion and analytics, or both order execution and portfolio queries.
+
+### Open/Closed Principle (OCP)
+
+The platform is **open for extension, closed for modification**:
+- **EventBridge schema registry**: New event types can be added without modifying existing services
+- **Glue Data Catalog**: New tables can be registered without changing ETL code
+- **Step Functions**: New orchestration steps can be added to the state machine without rewriting existing states
+- **Data Quality rules**: New rules are added via `QualityRuleConfig` list — no changes to the `DataQualityEngine` class itself
+- **SageMaker endpoint variants**: New model versions deployed via A/B split without changing Lambda code
+
+### Liskov Substitution Principle (LSP)
+
+- All Lambda handlers implement the same contract: `event → response`
+- All event schemas conform to EventBridge envelope (source, detail-type, detail)
+- SageMaker production and canary variants are interchangeable (same input/output contract)
+- DynamoDB and Aurora both implement the same `Repository` interface pattern in the service code
+
+### Interface Segregation Principle (ISP)
+
+- **API Gateway routes**: Each endpoint exposes only what that consumer needs
+  - `/v1/orders` — only order submission/retrieval (not portfolio)
+  - `/v1/portfolio` — only portfolio queries (not order execution)
+  - `/v1/advisory` — only recommendations (not trading)
+- **IAM policies**: Each role has ONLY the permissions it needs (no shared wildcard roles)
+- **Lake Formation**: Analysts see only Silver/Gold, not Bronze; PII columns excluded unless compliance role
+
+### Dependency Inversion Principle (DIP)
+
+- Lambda functions depend on **abstractions** (boto3 client interfaces), not concrete implementations
+- `AdvisoryAgentService.__init__` accepts injected clients (for testing):
+  ```python
+  def __init__(self, sagemaker_client=None, eventbridge_client=None, 
+               governance_engine=None, regulatory_store=None):
+  ```
+- `CircuitBreaker` accepts `table_name` parameter — not hardcoded to a specific DynamoDB table
+- `DataQualityEngine` accepts `event_emitter` callable — decoupled from EventBridge
+
+---
+
+## Reliability Patterns (12-Factor + Cloud-Native)
+
+### 1. Circuit Breaker Pattern
+
+```python
+# DynamoDB-backed distributed circuit breaker
+# Shared state across all Lambda instances via DynamoDB
+
+States:  CLOSED ──(5 failures)──► OPEN ──(60s timeout)──► HALF_OPEN ──(3 successes)──► CLOSED
+                                    │                         │
+                                    │                    (any failure)
+                                    │                         │
+                                    ◄─────────────────────────┘
+
+Configuration:
+  failure_threshold = 5        # Failures to trip circuit
+  recovery_timeout = 60s       # Wait before probe
+  success_threshold = 3        # Successes to close
+  table = CircuitBreakerState  # DynamoDB (shared across all Lambda invocations)
+
+Applied to:
+  - SageMaker endpoint calls (Advisory Agent)
+  - External market data provider connections
+  - DMS replication monitoring
+```
+
+**Why DynamoDB-backed** (not in-memory): Lambda functions are stateless and scale to thousands of instances. The circuit state MUST be shared across all concurrent executions — in-memory state would only protect a single instance.
+
+### 2. Eventual Consistency Model
+
+| Data Path | Consistency | Staleness Budget | Reconciliation |
+|-----------|-------------|------------------|----------------|
+| Order → Aurora ledger | **Strong** (ACID) | 0 (synchronous) | N/A — single truth |
+| Aurora → S3 Bronze (CDC) | Eventual | < 30 seconds | DMS lag metric + alarm |
+| Bronze → Silver (ETL) | Eventual | < 60 minutes | Lineage record counts |
+| Silver → Gold (ETL) | Eventual | < 30 minutes | Referential integrity check |
+| Gold → OpenSearch | Eventual | < 10 minutes | Index lag metric |
+| Gold → Neptune | Eventual | < 15 minutes | Bulk load completion check |
+| DynamoDB Portfolio cache | Eventual | < 5 seconds (SQS FIFO) | Periodic Aurora reconciliation |
+
+**Rule**: The ORDER LEDGER is always strongly consistent. Everything downstream is eventually consistent with monitored staleness budgets. Each boundary has a reconciliation mechanism.
+
+### 3. Sharding & Partitioning Strategy
+
+| Service | Sharding Approach | Key | Scale |
+|---------|-------------------|-----|-------|
+| **Kinesis** | Shard-based (16 shards) | instrument_id hash | 12K rec/sec burst |
+| **SQS FIFO** | Message Group ID | account_id | Ordered per-account |
+| **DynamoDB** | Hash key distribution | idempotency_key / service_name | Unlimited (on-demand) |
+| **Aurora** | Read replicas (no sharding) | N/A (single writer) | Serverless v2 auto-scale |
+| **S3** | Hive partitioning | source/year/month/day/hour | Unlimited (prefix-based) |
+| **OpenSearch** | Index shards (12) | trade_id hash | 6 data nodes |
+| **Neptune** | Internal graph partitioning | Vertex ID | Auto-scale readers |
+
+**Kinesis Partition Key Strategy**:
+```python
+# Partition key = instrument_id ensures all records for same instrument 
+# go to same shard → maintains ordering per instrument
+partition_key = hashlib.md5(record['instrument_id'].encode()).hexdigest()
+```
+
+**Hot Partition Mitigation**:
+- Kinesis ON_DEMAND mode auto-splits hot shards
+- DynamoDB on-demand billing handles hot keys automatically
+- OpenSearch uses 12 shards across 6 nodes for even distribution
+- S3 prefix randomization via Hive partitioning (source/date/hour)
+
+### 4. Rate Limiting & Throttling (Millions of Requests)
+
+```
+                    ┌─────────────────────────────────────────────┐
+                    │         RATE LIMITING LAYERS                  │
+                    │                                               │
+                    │  Layer 1: API Gateway (10K req/sec per client)│
+                    │     ├─ Authenticated: 10,000 req/sec         │
+                    │     ├─ Unauthenticated: 100 req/sec          │
+                    │     └─ Per-route: advisory=5K, graph=1K      │
+                    │                                               │
+                    │  Layer 2: Lambda Concurrency (Reserved)       │
+                    │     ├─ Market Data: 2,000 concurrent         │
+                    │     ├─ Order Manager: 1,000 concurrent       │
+                    │     ├─ Advisory Agent: 500 concurrent        │
+                    │     └─ Others: unreserved (account pool)     │
+                    │                                               │
+                    │  Layer 3: Aurora Connection Limits            │
+                    │     ├─ Max connections alarm: 500            │
+                    │     ├─ RDS Proxy (connection pooling)        │
+                    │     └─ Serverless v2 auto-scales ACUs        │
+                    │                                               │
+                    │  Layer 4: DynamoDB On-Demand                  │
+                    │     └─ No pre-provisioned capacity needed     │
+                    │                                               │
+                    │  Layer 5: Kinesis Back-pressure               │
+                    │     ├─ Iterator age alarm (>5s = consumer lag)│
+                    │     ├─ ON_DEMAND auto-splits shards          │
+                    │     └─ Enhanced fan-out (dedicated 2MB/sec)   │
+                    └─────────────────────────────────────────────┘
+```
+
+**Handling 200M Monthly Users (Peak: ~77K concurrent)**:
+- API Gateway burst: 10,000 req/sec (burst limit)
+- API Gateway sustained: 10,000 req/sec per route
+- WebSocket: 5,000 concurrent connections
+- Total Lambda concurrency: 2000 + 1000 + 500 = 3,500 reserved (plus unreserved pool)
+- Kinesis: 16 shards × 1,000 rec/sec = 16,000 rec/sec write capacity
+- Aurora Serverless v2: auto-scales 2→64 ACUs based on connections
+
+### 5. Backpressure & Throttling Response
+
+| Layer | Backpressure Signal | Response |
+|-------|--------------------:|----------|
+| API Gateway | HTTP 429 Too Many Requests | Retry-After header, client backs off |
+| Lambda throttled | Event goes to DLQ after 3 retries | Alarm fires, SSM scales concurrency |
+| Kinesis hot shard | WriteProvisionedThroughputExceeded | ON_DEMAND auto-splits shard |
+| SQS queue depth >10K | CloudWatch alarm | Composite alarm triggers investigation |
+| Aurora connections high | CloudWatch alarm at 500 | Serverless v2 scales up ACUs |
+| DMS lag >60s | Replication lag alarm | Auto-scale DMS instance class |
+| OpenSearch CPU >80% | CloudWatch alarm | Manual review (UltraWarm offload) |
+
+### 6. Idempotency at Every Boundary
+
+| Boundary | Idempotency Mechanism | Key |
+|----------|----------------------|-----|
+| API → Order Manager | `@idempotent` decorator (DynamoDB, 24h TTL) | Client-provided `idempotency_key` |
+| Kinesis → Market Data | Sequence number deduplication | Kinesis sequence + shard ID |
+| SQS FIFO → Wallet | Content-based deduplication + message dedup ID | Trade `order_id` |
+| Glue ETL → Silver | Job bookmarks + dedup composite key | instrument_id + timestamp + source |
+| DynamoDB Outbox → EventBridge | Outbox `published` flag | Outbox PK (OUTBOX#{uuid}) |
+| Aurora → DMS → S3 | LSN-based checkpoint | Source log sequence number |
+
+### 7. Retry Strategy (Exponential Backoff + Jitter)
+
+```
+Attempt 1: immediate
+Attempt 2: wait 1s × 2^0 × jitter(0.5-1.5) = ~1s
+Attempt 3: wait 1s × 2^1 × jitter(0.5-1.5) = ~2s
+Attempt 4: (exhausted) → route to DLQ → emit pipeline.failed event → alert ops team
+
+Max delay cap: 300s (5 minutes)
+Retryable exceptions: ConnectionError, TimeoutError, ThrottlingException
+Non-retryable: ValidationError, InsufficientMarginError, DataQualityAbortError
+```
+
+### 8. Failure Domains & Blast Radius
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│ FAILURE DOMAIN ISOLATION                                          │
+│                                                                   │
+│ ┌─────────────┐  ┌─────────────┐  ┌─────────────┐               │
+│ │ Trading     │  │ Analytics   │  │ ML/Advisory │  Independent   │
+│ │ (Aurora +   │  │ (OpenSearch │  │ (SageMaker  │  failure       │
+│ │  Lambda)    │  │  + Neptune  │  │  + S3)      │  domains       │
+│ │             │  │  + Athena)  │  │             │                │
+│ │ If this     │  │             │  │ If this     │                │
+│ │ fails:      │  │ Can fail    │  │ fails:      │                │
+│ │ - No new    │  │ independently│ │ - Advisory  │                │
+│ │   orders    │  │ without     │  │   returns   │                │
+│ │ - Existing  │  │ affecting   │  │   "unavail" │                │
+│ │   positions │  │ trading or  │  │ - Trading   │                │
+│ │   preserved │  │ ML advisory │  │   continues │                │
+│ └─────────────┘  └─────────────┘  └─────────────┘               │
+│                                                                   │
+│ Event backbone (EventBridge + SQS) provides:                      │
+│ - Buffering during failures (14-day SQS retention)                │
+│ - Replay capability (Kinesis 7-day, EventBridge 30-day archive)   │
+│ - Circuit breaker prevents cascade across domains                 │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+### 9. Performance Targets & Auto-Scaling
+
+| Metric | Target | Auto-Scale Mechanism |
+|--------|--------|---------------------|
+| API latency P99 | < 500ms | Lambda provisioned concurrency (warm starts) |
+| Order execution | < 30s timeout | Aurora Serverless v2 (2→64 ACUs) |
+| Market data ingestion | < 5s to Bronze | Kinesis ON_DEMAND (auto-split) |
+| Advisory recommendation | < 500ms P95 | SageMaker endpoint (1→10 instances) |
+| ETL Bronze→Silver | < 60 min | Glue auto-scaling (10→100 DPUs) |
+| ETL Silver→Gold | < 30 min | Glue auto-scaling (10→100 DPUs) |
+| CDC replication | < 30s latency | DMS auto-scale instance class |
+| Neptune graph query | < 5s (4 hops) | Auto-scale readers at 70% CPU |
+| OpenSearch search | < 1s (P95) | 6 data nodes + UltraWarm offload |
+
