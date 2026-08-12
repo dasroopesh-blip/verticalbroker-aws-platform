@@ -3370,3 +3370,283 @@ fields original_queue, failure_reason, retry_count
 | sort count desc
 ```
 
+
+
+---
+
+## Market Data Service — Connectivity Architecture
+
+### How Bloomberg B-Pipe & Thomson Reuters Connect to the Platform
+
+The Market Data Service has **two ingestion paths** — one for market data feeds (Bloomberg/Reuters) and one for client trading actions (Trader Interface via API Gateway):
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    MARKET DATA INGESTION PATHS                                │
+│                                                                               │
+│  PATH 1: Market Data Feeds (Bloomberg B-Pipe + Thomson Reuters)              │
+│  ═══════════════════════════════════════════════════════════════              │
+│                                                                               │
+│  [Bloomberg B-Pipe]──►[AWS PrivateLink / Direct Connect]──►[Kinesis Agent   │
+│                        (dedicated network connection)        on EC2 in VPC]   │
+│                                                                    │          │
+│  [Thomson Reuters] ──►[AWS PrivateLink / Direct Connect]──►[Kinesis Agent   │
+│                        (dedicated network connection)        on EC2 in VPC]   │
+│                                                                    │          │
+│                                                                    ▼          │
+│                                                        ┌────────────────────┐│
+│                                                        │ Kinesis Data Stream ││
+│                                                        │ 16 shards (12K/sec)││
+│                                                        └─────────┬──────────┘│
+│                                                                  │           │
+│                                                                  ▼           │
+│                                                   ┌──────────────────────┐   │
+│                                                   │ Lambda: MarketData   │   │
+│                                                   │ Processor (2000 conc)│   │
+│                                                   └──────────┬───────────┘   │
+│                                                              │               │
+│                                         ┌────────────────────┼───────────┐   │
+│                                         ▼                    ▼           ▼   │
+│                                   [S3 Bronze]        [Glue Catalog]  [EventBridge]
+│                                   (Parquet)          (partition reg)  (data.ingested)
+│                                                                               │
+│                                                                               │
+│  PATH 2: Client Trading Actions (Trader Interface → API Gateway)             │
+│  ════════════════════════════════════════════════════════════════             │
+│                                                                               │
+│  [Trader Interface]──►[API Gateway]──►[Lambda: OrderManager]──►[Aurora]      │
+│  (Web/Mobile App)     (REST + WS)     (idempotent, ACID)       (ledger)      │
+│                            │                    │                              │
+│                            │                    ▼                              │
+│                            │           [DynamoDB Outbox]──►[EventBridge]      │
+│                            │                                (trade.executed)   │
+│                            │                                     │            │
+│                            ▼                                     ▼            │
+│                  [Lambda: WalletService]              [SQS FIFO]──►[Wallet]   │
+│                  [Lambda: AdvisoryAgent]              (position update)        │
+│                                                                               │
+│  WebSocket path (real-time market data TO clients):                           │
+│  [Lambda: MarketData] ──► [EventBridge] ──► [WebSocket API] ──► [Clients]   │
+│                                                                               │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Bloomberg B-Pipe Connectivity (Detailed)
+
+Bloomberg B-Pipe is a **server-side, low-latency market data feed** delivered via dedicated network connections:
+
+```
+┌──────────────────┐     ┌────────────────────┐     ┌────────────────────────┐
+│  Bloomberg       │     │  Network Layer      │     │  AWS VPC (Private)      │
+│  B-Pipe Server   │────►│                     │────►│                         │
+│  (Bloomberg DC)  │     │  Option A:          │     │  EC2: Kinesis Agent     │
+│                  │     │  AWS Direct Connect │     │  (Amazon Kinesis Agent  │
+│  Protocol:       │     │  (1-10 Gbps, dedicated)  │   or custom Python)     │
+│  - TCP/IP        │     │                     │     │                         │
+│  - Bloomberg     │     │  Option B:          │     │  Receives: TCP stream   │
+│    proprietary   │     │  AWS PrivateLink    │     │  Transforms: to JSON    │
+│    (BLPAPI)      │     │  (VPC endpoint svc) │     │  Publishes: to Kinesis  │
+│                  │     │                     │     │                         │
+│  Data:           │     │  Option C:          │     │  Rate: 1,157/sec avg    │
+│  - Quotes        │     │  Site-to-Site VPN   │     │        12,000/sec burst │
+│  - Trades        │     │  (encrypted tunnel) │     │                         │
+│  - News          │     │                     │     │                         │
+└──────────────────┘     └────────────────────┘     └────────────┬───────────┘
+                                                                  │
+                                                                  ▼
+                                                     ┌────────────────────────┐
+                                                     │  Kinesis Data Stream    │
+                                                     │  vb-market-data-prod    │
+                                                     │  16 shards | ON_DEMAND  │
+                                                     │  7-day retention        │
+                                                     │  KMS encrypted          │
+                                                     └────────────────────────┘
+```
+
+**Connection Options** (interview answer):
+
+| Option | Use When | Latency | Cost |
+|--------|----------|---------|------|
+| **AWS Direct Connect** | Production (dedicated fiber, 1-10 Gbps) | <1ms to VPC | $$$$ |
+| **AWS PrivateLink** | If Bloomberg offers VPC endpoint service | <2ms | $$$ |
+| **Site-to-Site VPN** | Lower cost / backup path | 5-20ms | $$ |
+| **Internet (TLS)** | Dev/test only | Variable | $ |
+
+**For the interview**: "I would use AWS Direct Connect with a dedicated connection from Bloomberg's data center to our VPC. This provides <1ms latency, dedicated bandwidth (no contention), and stays on the AWS backbone — no internet traversal. A VPN serves as encrypted backup path for failover."
+
+### Thomson Reuters (Refinitiv) Connectivity
+
+Similar architecture but may use **Refinitiv Real-Time Distribution System (RTDS)**:
+
+```
+Thomson Reuters RTDS → Direct Connect → EC2 Agent → Kinesis → Lambda
+```
+
+Or **Refinitiv Data Platform (cloud-native API)**:
+```
+Refinitiv Cloud API → Lambda (HTTP polling / WebSocket) → Kinesis → Lambda
+```
+
+### EC2 Kinesis Agent (Feed Handler)
+
+The feed handler runs on EC2 in the private VPC (not Lambda) because:
+1. Bloomberg B-Pipe requires a **persistent TCP connection** (not request/response)
+2. Lambda has 15-min timeout — market feeds run continuously during market hours
+3. EC2 can maintain stateful connections with heartbeats and reconnection logic
+
+```python
+# src/services/market_data/feed_handler.py (runs on EC2, NOT Lambda)
+"""
+Bloomberg B-Pipe Feed Handler — EC2-based Kinesis Producer.
+
+Maintains persistent TCP connection to Bloomberg B-Pipe server,
+receives real-time market data, transforms to platform JSON format,
+and publishes to Kinesis Data Stream.
+
+Runs as a systemd service on EC2 instances in private data subnets.
+Auto Scaling Group: min 2, max 4 (multi-AZ for HA).
+"""
+
+import asyncio
+import json
+from datetime import datetime, timezone
+from decimal import Decimal
+
+import boto3
+from blpapi import Session, Event, Message  # Bloomberg API SDK
+
+class BloombergFeedHandler:
+    """Maintains persistent Bloomberg B-Pipe connection and publishes to Kinesis."""
+
+    def __init__(self, kinesis_stream: str, region: str = "us-east-1"):
+        self.kinesis = boto3.client("kinesis", region_name=region)
+        self.stream_name = kinesis_stream
+        self.session = None
+        self.connected = False
+        self.records_buffer = []
+        self.BATCH_SIZE = 500  # Kinesis PutRecords max batch
+
+    async def connect_bloomberg(self, host: str, port: int):
+        """Establish persistent TCP connection to Bloomberg B-Pipe."""
+        session_options = blpapi.SessionOptions()
+        session_options.setServerHost(host)
+        session_options.setServerPort(port)
+        self.session = blpapi.Session(session_options)
+        self.session.start()
+        self.session.openService("//blp/mktdata")
+        self.connected = True
+
+    async def subscribe(self, instruments: list[str]):
+        """Subscribe to market data for given instruments."""
+        subscriptions = blpapi.SubscriptionList()
+        for isin in instruments:
+            subscriptions.add(isin, "LAST_PRICE,BID,ASK,VOLUME", "", blpapi.CorrelationId(isin))
+        self.session.subscribe(subscriptions)
+
+    async def process_events(self):
+        """Main event loop — processes Bloomberg events continuously."""
+        while self.connected:
+            event = self.session.nextEvent(timeout=1000)
+            if event.eventType() == blpapi.Event.SUBSCRIPTION_DATA:
+                for msg in event:
+                    record = self._transform_to_platform_format(msg)
+                    self.records_buffer.append(record)
+                    
+                    if len(self.records_buffer) >= self.BATCH_SIZE:
+                        await self._flush_to_kinesis()
+
+    def _transform_to_platform_format(self, msg: Message) -> dict:
+        """Transform Bloomberg message to VerticalBroker platform format."""
+        return {
+            "source_id": "bloomberg",
+            "instrument_id": str(msg.correlationId().value()),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "bid_price": str(msg.getElementAsFloat("BID")),
+            "ask_price": str(msg.getElementAsFloat("ASK")),
+            "last_price": str(msg.getElementAsFloat("LAST_PRICE")),
+            "volume": msg.getElementAsInteger("VOLUME"),
+        }
+
+    async def _flush_to_kinesis(self):
+        """Batch publish buffered records to Kinesis Data Stream."""
+        records = [
+            {
+                "Data": json.dumps(r).encode("utf-8"),
+                "PartitionKey": r["instrument_id"],  # Same instrument → same shard
+            }
+            for r in self.records_buffer
+        ]
+        self.kinesis.put_records(StreamName=self.stream_name, Records=records)
+        self.records_buffer = []
+```
+
+### Complete Data Flow (End-to-End)
+
+```
+MARKET DATA PATH (automated, continuous):
+  Bloomberg B-Pipe ──[Direct Connect]──► EC2 Feed Handler ──► Kinesis (16 shards)
+  Thomson Reuters  ──[Direct Connect]──► EC2 Feed Handler ──► Kinesis (16 shards)
+                                                                     │
+                                                                     ▼
+                                                    Lambda: MarketDataProcessor
+                                                    (validates, enriches, writes)
+                                                                     │
+                                              ┌──────────────────────┼──────────────┐
+                                              ▼                      ▼              ▼
+                                        S3 Bronze              Glue Catalog    EventBridge
+                                        (Parquet)             (partition)    (data.ingested)
+                                                                                    │
+                                                                                    ▼
+                                                                           Step Functions
+                                                                        (ETL orchestrator)
+
+
+CLIENT TRADING PATH (user-initiated, request/response):
+  Trader Interface ──[HTTPS]──► API Gateway ──► Lambda: OrderManager ──► Aurora (ACID)
+  (browser/mobile)              (JWT auth)      (validates order)          │
+                                    │                                      ▼
+                                    │                              DynamoDB Outbox
+                                    │                                      │
+                                    │                              DynamoDB Stream
+                                    │                                      │
+                                    │                                      ▼
+                                    │                    Outbox Publisher Lambda
+                                    │                                      │
+                                    │                                      ▼
+                                    │                              EventBridge
+                                    │                          (trade.executed event)
+                                    │                                      │
+                                    ▼                                      ▼
+                          Lambda: WalletService              SQS FIFO → Wallet Service
+                          (portfolio query)                  (position update)
+
+
+REAL-TIME MARKET DATA TO CLIENTS (push via WebSocket):
+  S3 Bronze ──► Lambda ──► EventBridge ──► WebSocket API Gateway ──► Client browsers
+  (new data)                (data.ingested)    (wss://market-data)     (subscribed)
+```
+
+### Key Interview Answer
+
+> "Bloomberg B-Pipe and Thomson Reuters connect via **AWS Direct Connect** to EC2 feed handlers running in our private VPC. These maintain persistent TCP connections because market data is a continuous stream (not request/response). The feed handlers transform proprietary wire formats into platform JSON and batch-publish to **Kinesis** at up to 12,000 records/second.
+>
+> The **Trader Interface** connects via **API Gateway** (HTTPS + WebSocket). Trading actions (orders, portfolio queries, advisory requests) go through REST endpoints with JWT authentication. Real-time market data is pushed BACK to clients via the WebSocket API.
+>
+> These are **two separate ingestion paths** that converge in the event backbone (EventBridge). Market data flows to the data lake. Trade executions flow to the portfolio service. Both ultimately feed the Gold layer for analytics and ML."
+
+### Why Not Lambda for Bloomberg/Reuters Feed Handling?
+
+| Concern | Lambda | EC2 Feed Handler |
+|---------|--------|-----------------|
+| Persistent TCP connection | ❌ 15-min timeout | ✅ Runs continuously |
+| Connection state (heartbeats) | ❌ Stateless | ✅ Maintains connection |
+| Bloomberg BLPAPI SDK | ❌ Complex in Lambda | ✅ Standard deployment |
+| Reconnection on network blip | ❌ Cold start penalty | ✅ Immediate reconnect |
+| Cost (24/7 during market hours) | ❌ Expensive at sustained throughput | ✅ Reserved instances |
+
+**However**: Lambda IS used for the **processing** step (MarketDataProcessor) because:
+- It's triggered by Kinesis (event-driven, auto-scales)
+- Each invocation is short (process batch → write Parquet → done)
+- No persistent connections needed
+- Scales to 2,000 concurrent for burst handling
+
