@@ -54,7 +54,8 @@ graph TB
         COG[Cognito<br/>Identity Service]
         OM[Order Manager<br/>Lambda]
         WS[Wallet Service<br/>Lambda]
-        MDS[Market Data Service<br/>Lambda<br/>(Kinesis-triggered, NOT API GW)]
+        MDS[Market Data Service Lambda - Kinesis triggered]
+Kinesis-triggered NOT API GW]
         DDB[(DynamoDB<br/>Idempotency + State)]
     end
 
