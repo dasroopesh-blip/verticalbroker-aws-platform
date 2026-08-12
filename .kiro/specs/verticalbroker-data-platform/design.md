@@ -55,7 +55,6 @@ graph TB
         OM[Order Manager<br/>Lambda]
         WS[Wallet Service<br/>Lambda]
         MDS[Market Data Service Lambda - Kinesis triggered]
-Kinesis-triggered NOT API GW]
         DDB[(DynamoDB<br/>Idempotency + State)]
     end
 
