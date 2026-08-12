@@ -56,6 +56,7 @@ graph TB
         WS[Wallet Service<br/>Lambda]
         MDS[Market Data Service Lambda - Kinesis triggered]
         DDB[(DynamoDB<br/>Idempotency + State)]
+        AURORA[(Aurora PostgreSQL<br/>ACID Ledger Truth)]
     end
 
     subgraph "Lane 2: Event + Lakehouse"
@@ -100,6 +101,8 @@ graph TB
     KDS --> MDS
     APIGW --> AA
     OM --> DDB
+    OM --> AURORA
+    WS --> AURORA
     WS --> DDB
     OM --> EB
     MDS --> EB
@@ -115,6 +118,7 @@ graph TB
     S3S --> CAT
     S3G --> CAT
     DMS --> S3B
+    AURORA --> DMS
 
     S3G --> OS
     S3G --> NEP
@@ -2515,10 +2519,14 @@ graph LR
         WS[Wallet Service Lambda] --> AURORA
         AURORA --> DMS[DMS CDC<br/>< 30s latency]
         DMS --> S3B[(S3 Bronze<br/>Data Lake)]
+    AURORA --> DMS
     end
     
     subgraph "Operational Cache (Eventually Consistent)"
         OM --> DDB[(DynamoDB<br/>Idempotency + Outbox)]
+    OM --> AURORA
+    WS --> AURORA
+        AURORA[(Aurora PostgreSQL<br/>ACID Ledger Truth)]
         WS --> DDB2[(DynamoDB<br/>Portfolio Cache)]
     end
 ```
