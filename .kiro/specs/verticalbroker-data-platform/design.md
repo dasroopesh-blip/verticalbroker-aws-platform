@@ -54,7 +54,7 @@ graph TB
         COG[Cognito<br/>Identity Service]
         OM[Order Manager<br/>Lambda]
         WS[Wallet Service<br/>Lambda]
-        MDS[Market Data Service<br/>Lambda]
+        MDS[Market Data Service<br/>Lambda<br/>(Kinesis-triggered, NOT API GW)]
         DDB[(DynamoDB<br/>Idempotency + State)]
     end
 
@@ -97,7 +97,7 @@ graph TB
     APIGW --> COG
     APIGW --> OM
     APIGW --> WS
-    APIGW --> MDS
+    KDS --> MDS
     APIGW --> AA
     OM --> DDB
     WS --> DDB
