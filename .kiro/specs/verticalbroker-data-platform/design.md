@@ -891,12 +891,12 @@ graph TB
         VAL[Request Validation<br/>OpenAPI 3.0 Schema]
         
         subgraph "REST Endpoints"
-            V1[/v1/*]
-            V2[/v2/*]
+            V1[v1 endpoints]
+            V2[v2 endpoints]
         end
         
         subgraph "WebSocket Endpoints"
-            WS[wss://market-data<br/>2h connection limit]
+            WS[WebSocket market-data 2h limit]
         end
     end
 
