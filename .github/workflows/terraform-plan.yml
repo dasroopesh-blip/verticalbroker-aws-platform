@@ -1,0 +1,123 @@
+name: Terraform Plan (PR Comment)
+
+on:
+  pull_request:
+    paths:
+      - 'terraform/**'
+      - '.github/workflows/terraform-plan.yml'
+
+permissions:
+  contents: read
+  pull-requests: write
+
+env:
+  TERRAFORM_VERSION: "1.5.7"
+  AWS_REGION: "us-east-1"
+
+jobs:
+  plan:
+    name: Terraform Plan
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        environment: [dev, staging, production]
+      fail-fast: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_PLAN_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+        continue-on-error: true
+
+      - name: Terraform Init
+        id: init
+        run: terraform init -input=false
+        working-directory: terraform/environments/${{ matrix.environment }}
+        continue-on-error: true
+
+      - name: Terraform Plan
+        id: plan
+        run: |
+          terraform plan \
+            -var-file=terraform.tfvars \
+            -no-color \
+            -input=false \
+            2>&1 | tee plan-${{ matrix.environment }}.txt
+        working-directory: terraform/environments/${{ matrix.environment }}
+        continue-on-error: true
+
+      - name: Comment PR with Plan
+        uses: actions/github-script@v7
+        if: github.event_name == 'pull_request'
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const env = '${{ matrix.environment }}';
+            const planStatus = '${{ steps.plan.outcome }}';
+
+            let planOutput = '';
+            try {
+              planOutput = fs.readFileSync(`terraform/environments/${env}/plan-${env}.txt`, 'utf8');
+            } catch (e) {
+              planOutput = 'Plan output not available';
+            }
+
+            // Truncate if too long
+            const maxLength = 60000;
+            if (planOutput.length > maxLength) {
+              planOutput = planOutput.substring(0, maxLength) + '\n\n... (truncated)';
+            }
+
+            const statusEmoji = planStatus === 'success' ? '✅' : '❌';
+
+            const body = `### ${statusEmoji} Terraform Plan: \`${env}\`
+
+            <details>
+            <summary>Show Plan Output</summary>
+
+            \`\`\`hcl
+            ${planOutput}
+            \`\`\`
+
+            </details>
+
+            **Status:** ${planStatus}
+            **Environment:** ${env}
+            **Triggered by:** @${{ github.actor }}
+            `;
+
+            // Find existing comment for this environment
+            const comments = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            const botComment = comments.data.find(c =>
+              c.user.type === 'Bot' && c.body.includes(`Terraform Plan: \`${env}\``)
+            );
+
+            if (botComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body: body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: body,
+              });
+            }

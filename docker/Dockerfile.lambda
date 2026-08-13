@@ -1,0 +1,58 @@
+# =============================================================================
+# VerticalBroker Lambda Deployment Package Builder
+# Builds Lambda ZIP artifacts with ARM64/Graviton2 native dependencies
+# Usage:
+#   docker build -f docker/Dockerfile.lambda -t vb-lambda-builder .
+#   docker run --rm -v $(pwd)/build:/output vb-lambda-builder
+# =============================================================================
+
+FROM public.ecr.aws/lambda/python:3.12-arm64 AS builder
+
+# Install build tools
+RUN dnf install -y zip && dnf clean all
+
+WORKDIR /build
+
+# Build Lambda layer (dependencies only)
+COPY requirements/lambda-layer.txt /build/requirements.txt
+RUN pip install \
+    -r requirements.txt \
+    -t /build/layer/python/lib/python3.12/site-packages/ \
+    --no-cache-dir \
+    --compile
+
+# Remove unnecessary files from layer
+RUN find /build/layer -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true && \
+    find /build/layer -name "*.dist-info" -exec rm -rf {} + 2>/dev/null || true && \
+    find /build/layer -name "*.egg-info" -exec rm -rf {} + 2>/dev/null || true && \
+    find /build/layer -name "tests" -type d -exec rm -rf {} + 2>/dev/null || true && \
+    find /build/layer -name "*.so" -exec strip {} + 2>/dev/null || true
+
+# Package layer
+RUN cd /build/layer && zip -r /build/lambda-layer.zip python/ -x "*.pyc"
+
+# Build function code
+COPY src/ /build/src/
+RUN cd /build/src && zip -r /build/lambda-functions.zip . \
+    -x "__pycache__/*" \
+    -x "*.pyc" \
+    -x "etl/*" \
+    -x "*.egg-info/*"
+
+# Build Glue scripts package (separate deployment)
+RUN mkdir -p /build/glue && \
+    cp -r /build/src/etl/* /build/glue/ && \
+    cp -r /build/src/common/* /build/glue/ && \
+    cd /build/glue && zip -r /build/glue-scripts.zip .
+
+# =============================================================================
+# Output Stage - Copy artifacts
+# =============================================================================
+FROM alpine:3.19 AS output
+
+COPY --from=builder /build/lambda-layer.zip /output/
+COPY --from=builder /build/lambda-functions.zip /output/
+COPY --from=builder /build/glue-scripts.zip /output/
+
+# Default command: copy to mounted volume
+CMD ["sh", "-c", "cp /output/* /artifacts/ && echo 'Build artifacts copied to /artifacts/'"]

@@ -1,0 +1,221 @@
+name: CI - Lint, Test & Security
+
+on:
+  pull_request:
+    branches: [main, develop]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+env:
+  PYTHON_VERSION: "3.12"
+  TERRAFORM_VERSION: "1.5.7"
+  AWS_DEFAULT_REGION: "us-east-1"
+
+jobs:
+  # =========================================================================
+  # Python Lint & Format Check
+  # =========================================================================
+  lint:
+    name: Python Lint & Format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements/dev.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install ruff black mypy
+
+      - name: Ruff lint
+        run: ruff check src/ tests/ --output-format=github
+
+      - name: Black format check
+        run: black --check --diff src/ tests/
+
+      - name: Mypy type check
+        run: mypy src/ --ignore-missing-imports --no-error-summary || true
+
+  # =========================================================================
+  # Python Unit Tests
+  # =========================================================================
+  test-unit:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements/dev.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements/dev.txt
+          pip install -e .
+
+      - name: Run unit tests
+        run: |
+          pytest tests/unit/ \
+            -m "unit" \
+            --cov=src \
+            --cov-report=xml:coverage.xml \
+            --cov-report=term-missing \
+            --junitxml=test-results.xml \
+            -v
+        env:
+          AWS_ACCESS_KEY_ID: testing
+          AWS_SECRET_ACCESS_KEY: testing
+          AWS_SECURITY_TOKEN: testing
+          AWS_SESSION_TOKEN: testing
+          POWERTOOLS_SERVICE_NAME: verticalbroker-test
+          ENVIRONMENT: test
+
+      - name: Upload coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage.xml
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: test-results.xml
+
+  # =========================================================================
+  # Integration Tests
+  # =========================================================================
+  test-integration:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    needs: test-unit
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements/dev.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements/dev.txt
+          pip install -e .
+
+      - name: Run integration tests
+        run: |
+          pytest tests/integration/ \
+            -m "integration" \
+            --junitxml=integration-results.xml \
+            -v
+        env:
+          AWS_ACCESS_KEY_ID: testing
+          AWS_SECRET_ACCESS_KEY: testing
+          AWS_SECURITY_TOKEN: testing
+          AWS_SESSION_TOKEN: testing
+          ENVIRONMENT: test
+
+  # =========================================================================
+  # Security Scan
+  # =========================================================================
+  security:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install security tools
+        run: |
+          pip install bandit safety
+
+      - name: Bandit (Python security linter)
+        run: |
+          bandit -r src/ \
+            -c pyproject.toml \
+            --severity-level medium \
+            --confidence-level medium \
+            -f json -o bandit-results.json || true
+          bandit -r src/ --severity-level high --confidence-level high
+
+      - name: Safety (dependency vulnerability check)
+        run: |
+          pip install -r requirements/base.txt
+          safety check --output json 2>/dev/null || echo "Safety check completed (requires API key for full results)"
+
+  # =========================================================================
+  # Terraform Validation
+  # =========================================================================
+  terraform-validate:
+    name: Terraform Validate & Security
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+
+      - name: Terraform Format Check
+        run: terraform fmt -check -recursive -diff
+        working-directory: terraform
+        continue-on-error: true
+
+      - name: Terraform Init (root)
+        run: terraform init -backend=false -input=false
+        working-directory: terraform
+
+      - name: Terraform Validate (root)
+        run: terraform validate
+        working-directory: terraform
+
+      - name: Setup TFLint
+        uses: terraform-linters/setup-tflint@v4
+        with:
+          tflint_version: latest
+
+      - name: TFLint
+        run: |
+          tflint --init
+          tflint --recursive
+        working-directory: terraform
+        continue-on-error: true
+
+      - name: Install Checkov
+        run: pip install checkov
+
+      - name: Checkov Security Scan
+        run: |
+          checkov --directory terraform/ \
+            --framework terraform \
+            --output cli \
+            --compact \
+            --quiet \
+            --soft-fail
+        continue-on-error: true

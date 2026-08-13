@@ -1,0 +1,54 @@
+# =============================================================================
+# VerticalBroker Glue/PySpark Development Container
+# Provides local PySpark environment matching AWS Glue 4.0 (Spark 3.3.0)
+# Usage:
+#   docker build -f docker/Dockerfile.glue -t vb-glue-dev .
+#   docker run -it --rm -v $(pwd):/workspace vb-glue-dev
+# =============================================================================
+
+FROM python:3.12-slim AS base
+
+# Install Java (required for PySpark)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    openjdk-17-jre-headless \
+    curl \
+    zip \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set Java environment
+ENV JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
+ENV PATH="${JAVA_HOME}/bin:${PATH}"
+
+WORKDIR /workspace
+
+# Install Python dependencies for ETL development
+COPY requirements/base.txt /tmp/base.txt
+COPY requirements/dev.txt /tmp/dev.txt
+
+RUN pip install --no-cache-dir \
+    pyspark==3.5.0 \
+    pandas>=2.1.0 \
+    numpy>=1.26.0 \
+    boto3>=1.34.0 \
+    moto[all]>=5.0.0 \
+    pytest>=7.4.0 \
+    pytest-cov>=4.1.0
+
+# Install a minimal aws-glue-libs shim for local development
+# (Provides GlueContext, DynamicFrame stubs for local testing)
+RUN pip install --no-cache-dir aws-glue-libs 2>/dev/null || \
+    echo "aws-glue-libs not available via pip; using local stubs"
+
+# Spark configuration for local development
+ENV SPARK_HOME=/usr/local/lib/python3.12/site-packages/pyspark
+ENV PYSPARK_PYTHON=python3
+ENV PYSPARK_DRIVER_PYTHON=python3
+
+# Configure Spark for local mode
+RUN mkdir -p /tmp/spark-warehouse /tmp/spark-events
+
+COPY src/ /workspace/src/
+COPY tests/ /workspace/tests/
+
+# Default: Run PySpark shell
+CMD ["python", "-c", "from pyspark.sql import SparkSession; spark = SparkSession.builder.master('local[*]').appName('vb-glue-dev').getOrCreate(); print(f'Spark {spark.version} ready'); spark.stop()"]

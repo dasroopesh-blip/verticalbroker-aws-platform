@@ -1,0 +1,21 @@
+# =============================================================================
+# Bandit Configuration (Python Security Linter)
+# Docs: https://bandit.readthedocs.io/
+# =============================================================================
+
+[bandit]
+# Directories to scan
+targets = src
+
+# Skip specific test IDs
+skips = B101,B601
+
+# B101: assert_used - we use asserts in production for invariants
+# B601: paramiko_calls - not applicable
+
+# Exclude test directories
+exclude = tests,build,dist,.venv,venv
+
+# Severity level
+severity = medium
+confidence = medium

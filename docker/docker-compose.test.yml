@@ -1,0 +1,72 @@
+# =============================================================================
+# VerticalBroker CI/Test Stack (Minimal)
+# Used by CI pipelines for integration testing. No persistent volumes.
+# Usage:
+#   docker compose -f docker/docker-compose.test.yml up -d
+#   pytest tests/integration/
+#   docker compose -f docker/docker-compose.test.yml down
+# =============================================================================
+
+version: "3.9"
+
+services:
+  # ===========================================================================
+  # LocalStack (minimal services for integration tests)
+  # ===========================================================================
+  localstack:
+    image: localstack/localstack:3.0
+    container_name: vb-localstack-test
+    ports:
+      - "4566:4566"
+    environment:
+      - SERVICES=s3,dynamodb,sqs,kinesis,events,sts
+      - DEBUG=0
+      - PERSISTENCE=0
+      - AWS_DEFAULT_REGION=us-east-1
+      - AWS_ACCESS_KEY_ID=testing
+      - AWS_SECRET_ACCESS_KEY=testing
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ===========================================================================
+  # Test Runner
+  # ===========================================================================
+  test-runner:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.glue
+    container_name: vb-test-runner
+    volumes:
+      - "../src:/workspace/src:ro"
+      - "../tests:/workspace/tests:ro"
+      - "../pyproject.toml:/workspace/pyproject.toml:ro"
+    environment:
+      - AWS_ENDPOINT_URL=http://localstack:4566
+      - AWS_DEFAULT_REGION=us-east-1
+      - AWS_ACCESS_KEY_ID=testing
+      - AWS_SECRET_ACCESS_KEY=testing
+      - ENVIRONMENT=test
+      - BRONZE_BUCKET=vb-bronze-test
+      - SILVER_BUCKET=vb-silver-test
+      - GOLD_BUCKET=vb-gold-test
+      - EVENT_BUS_NAME=verticalbroker-platform-test
+      - IDEMPOTENCY_TABLE=IdempotencyStore
+      - PORTFOLIO_TABLE=Portfolio
+      - ORDERS_TABLE=Orders
+    depends_on:
+      localstack:
+        condition: service_healthy
+    command: >
+      pytest tests/ -v
+        --junitxml=/workspace/test-results.xml
+        --cov=src
+        --cov-report=xml:/workspace/coverage.xml
+    profiles:
+      - ci
+
+networks:
+  default:
+    name: verticalbroker-test-net

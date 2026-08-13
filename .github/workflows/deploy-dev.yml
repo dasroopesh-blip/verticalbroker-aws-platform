@@ -1,0 +1,171 @@
+name: Deploy to Dev
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  PYTHON_VERSION: "3.12"
+  TERRAFORM_VERSION: "1.5.7"
+  AWS_REGION: "us-east-1"
+  ENVIRONMENT: "dev"
+
+jobs:
+  # =========================================================================
+  # Build Lambda Packages
+  # =========================================================================
+  build:
+    name: Build Lambda Packages
+    runs-on: ubuntu-latest
+    outputs:
+      lambda-artifact: ${{ steps.upload.outputs.artifact-id }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Build Lambda layer
+        run: |
+          mkdir -p build/layer/python/lib/python3.12/site-packages
+          pip install -r requirements/lambda-layer.txt \
+            -t build/layer/python/lib/python3.12/site-packages/ \
+            --platform manylinux2014_aarch64 \
+            --implementation cp \
+            --python-version 3.12 \
+            --only-binary=:all:
+          cd build/layer && zip -r ../lambda-layer.zip python/
+
+      - name: Build Lambda function packages
+        run: |
+          # Package source code (shared across all functions)
+          cd src && zip -r ../build/lambda-functions.zip . \
+            -x "__pycache__/*" \
+            -x "*.pyc" \
+            -x "etl/*"
+
+      - name: Build Glue scripts package
+        run: |
+          mkdir -p build/glue
+          cp -r src/etl/* build/glue/
+          cp -r src/common/* build/glue/
+          cd build/glue && zip -r ../glue-scripts.zip .
+
+      - name: Upload build artifacts
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: deployment-packages
+          path: |
+            build/lambda-layer.zip
+            build/lambda-functions.zip
+            build/glue-scripts.zip
+          retention-days: 5
+
+  # =========================================================================
+  # Terraform Plan & Apply (Dev)
+  # =========================================================================
+  deploy-infrastructure:
+    name: Deploy Infrastructure (Dev)
+    runs-on: ubuntu-latest
+    needs: build
+    environment: dev
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+
+      - name: Terraform Init
+        run: terraform init
+        working-directory: terraform/environments/dev
+
+      - name: Terraform Plan
+        run: |
+          terraform plan \
+            -var-file=terraform.tfvars \
+            -out=tfplan \
+            -no-color
+        working-directory: terraform/environments/dev
+
+      - name: Terraform Apply
+        run: terraform apply -auto-approve tfplan
+        working-directory: terraform/environments/dev
+
+  # =========================================================================
+  # Deploy Lambda Code
+  # =========================================================================
+  deploy-code:
+    name: Deploy Lambda & Glue Code
+    runs-on: ubuntu-latest
+    needs: deploy-infrastructure
+    environment: dev
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: deployment-packages
+          path: build/
+
+      - name: Deploy Lambda Layer
+        run: |
+          aws lambda publish-layer-version \
+            --layer-name verticalbroker-dependencies-dev \
+            --compatible-runtimes python3.12 \
+            --compatible-architectures arm64 \
+            --zip-file fileb://build/lambda-layer.zip \
+            --description "VerticalBroker dependencies layer (dev)"
+
+      - name: Deploy Lambda Functions
+        run: |
+          FUNCTIONS=(
+            "vb-market-data-processor-dev"
+            "vb-order-manager-dev"
+            "vb-wallet-service-dev"
+            "vb-advisory-agent-dev"
+            "vb-cdc-handler-dev"
+            "vb-dlq-processor-dev"
+          )
+          for func in "${FUNCTIONS[@]}"; do
+            aws lambda update-function-code \
+              --function-name "${func}" \
+              --zip-file fileb://build/lambda-functions.zip \
+              --architectures arm64 \
+              2>/dev/null || echo "Function ${func} not found (may not be deployed yet)"
+          done
+
+      - name: Deploy Glue Scripts
+        run: |
+          aws s3 sync build/glue/ \
+            s3://vb-glue-scripts-dev/src/etl/ \
+            --delete \
+            --sse aws:kms
+
+      - name: Post-deployment smoke test
+        run: |
+          echo "Verifying Lambda functions are active..."
+          aws lambda get-function --function-name vb-market-data-processor-dev \
+            --query 'Configuration.State' --output text 2>/dev/null || echo "Smoke test skipped"

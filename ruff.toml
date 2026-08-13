@@ -1,0 +1,74 @@
+# =============================================================================
+# Ruff Configuration
+# Fast Python linter (replaces flake8, isort, pyflakes, pycodestyle)
+# Docs: https://docs.astral.sh/ruff/
+# =============================================================================
+
+target-version = "py312"
+line-length = 120
+
+# Exclude generated/vendor files
+exclude = [
+    ".git",
+    ".mypy_cache",
+    ".ruff_cache",
+    "__pycache__",
+    "build",
+    "dist",
+    ".terraform",
+    "*.egg-info",
+    "venv",
+    ".venv",
+]
+
+[lint]
+# Enable rules (E=pycodestyle, F=pyflakes, I=isort, B=bugbear, S=bandit, UP=pyupgrade)
+select = [
+    "E",      # pycodestyle errors
+    "F",      # pyflakes
+    "I",      # isort (import sorting)
+    "B",      # flake8-bugbear
+    "UP",     # pyupgrade
+    "S",      # flake8-bandit (security)
+    "C4",     # flake8-comprehensions
+    "DTZ",    # flake8-datetimez (enforce timezone-aware datetimes)
+    "T20",    # flake8-print (no print statements)
+    "SIM",    # flake8-simplify
+    "TCH",    # flake8-type-checking
+    "RUF",    # ruff-specific rules
+]
+
+ignore = [
+    "E501",   # line too long (handled by formatter)
+    "S101",   # assert in tests is fine
+    "S105",   # hardcoded passwords (false positives in test fixtures)
+    "S106",   # hardcoded passwords
+    "B008",   # function call in default arg (Powertools patterns)
+    "UP007",  # Optional[X] → X | None (keep for clarity)
+]
+
+# Allow these in specific directories
+[lint.per-file-ignores]
+"tests/**/*.py" = [
+    "S101",   # assert allowed in tests
+    "S105",   # hardcoded test credentials OK
+    "S106",   # hardcoded test credentials OK
+    "T20",    # print allowed in tests
+    "B011",   # assert False allowed in tests
+]
+"src/etl/**/*.py" = [
+    "T20",    # print may be used for Glue job logging
+]
+"scripts/**/*.py" = [
+    "T20",    # print allowed in scripts
+    "S603",   # subprocess calls allowed in scripts
+]
+
+[lint.isort]
+known-first-party = ["src"]
+known-third-party = ["boto3", "botocore", "aws_lambda_powertools", "pyspark", "sagemaker"]
+force-single-line = false
+lines-after-imports = 2
+
+[lint.flake8-bandit]
+check-typed-exception = true
