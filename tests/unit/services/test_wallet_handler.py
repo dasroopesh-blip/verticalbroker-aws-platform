@@ -4,10 +4,8 @@ Tests: Portfolio retrieval, position updates, margin validation, SQS FIFO proces
 """
 
 import json
-import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
-from unittest.mock import MagicMock, patch
 
 import boto3
 import pytest
@@ -48,7 +46,7 @@ class TestWalletServiceAPI:
                 "MSFT": {"quantity": Decimal("50"), "avg_cost": Decimal("380.00")},
             },
             "cash_balance": Decimal("50000.00"),
-            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": datetime.now(UTC).isoformat(),
         })
 
         response = table.get_item(Key={"client_id": "client-001", "account_id": "account-001"})

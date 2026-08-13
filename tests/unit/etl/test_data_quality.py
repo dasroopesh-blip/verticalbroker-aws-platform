@@ -3,7 +3,7 @@ Unit tests for Data Quality Engine.
 Tests: Rule evaluation, severity levels, scoring (0-100), abort conditions.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -156,7 +156,7 @@ class TestQualityAssessment:
         """Assessment contains results for each evaluated rule."""
         assessment = {
             "dataset_name": "market_data_silver",
-            "evaluation_timestamp": datetime.now(timezone.utc).isoformat(),
+            "evaluation_timestamp": datetime.now(UTC).isoformat(),
             "overall_score": 91.75,
             "has_high_severity": False,
             "rules_evaluated": 5,
@@ -208,7 +208,7 @@ class TestQualityScorecard:
             "consistency": 88.5,
             "timeliness": 100.0,
             "overall_score": 93.25,
-            "evaluated_at": datetime.now(timezone.utc).isoformat(),
+            "evaluated_at": datetime.now(UTC).isoformat(),
         }
         assert all(0 <= v <= 100 for k, v in scorecard.items() if isinstance(v, float))
 

@@ -6,7 +6,7 @@ Tests: BaseEvent, DataIngestedEvent, TradeExecutedEvent, PipelineFailedEvent,
 
 import json
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -48,7 +48,7 @@ class TestBaseEvent:
             "DetailType": "MarketDataIngested",
             "EventBusName": "verticalbroker-platform",
             "Detail": json.dumps({
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
                 "correlation_id": str(uuid.uuid4()),
             }),
         }
@@ -70,7 +70,7 @@ class TestDataIngestedEvent:
             "record_count": 100,
             "size_bytes": 45000,
             "instrument_types": ["equity", "option"],
-            "ingestion_timestamp": datetime.now(timezone.utc).isoformat(),
+            "ingestion_timestamp": datetime.now(UTC).isoformat(),
             "correlation_id": str(uuid.uuid4()),
         }
         assert detail["record_count"] > 0
@@ -98,7 +98,7 @@ class TestTradeExecutedEvent:
             "quantity": "100",
             "price": "185.50",
             "total_value": "18550.00",
-            "executed_at": datetime.now(timezone.utc).isoformat(),
+            "executed_at": datetime.now(UTC).isoformat(),
             "correlation_id": str(uuid.uuid4()),
         }
         assert detail["side"] in ("BUY", "SELL")
@@ -132,7 +132,7 @@ class TestPipelineFailedEvent:
             "records_rejected": 17500,
             "duration_seconds": 245,
             "retry_count": 2,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
         assert detail["error_type"] == "DataQualityAbortError"
         rejection_rate = detail["records_rejected"] / detail["records_processed"]
@@ -155,7 +155,7 @@ class TestComplianceAlertEvent:
             "affected_resource": "arn:aws:s3:::vb-regulatory-prod",
             "source_ip": "10.0.1.15",
             "user_identity": "arn:aws:iam::123456789012:user/suspicious-user",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "remediation": "Credentials rotated automatically via SSM Runbook",
         }
         assert detail["severity"] in ("LOW", "MEDIUM", "HIGH", "CRITICAL")
@@ -181,7 +181,7 @@ class TestAdvisoryGeneratedEvent:
             "governance_outcome": "APPROVED",
             "model_version": "v2.3.1",
             "latency_ms": 350,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
         assert detail["confidence"] >= 0.7  # No human review needed
         assert detail["requires_human_review"] is False

@@ -8,7 +8,7 @@ import base64
 import json
 import os
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from unittest.mock import MagicMock, patch
 
@@ -176,7 +176,7 @@ def sample_kinesis_event():
         payload = {
             "source_id": f"bloomberg-{i}",
             "instrument_id": f"AAPL-{i}",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "event_type": "TRADE",
             "price": 185.50 + i,
             "volume": 1000 + i * 100,
@@ -292,7 +292,7 @@ def sample_sqs_fifo_event():
         "side": "BUY",
         "quantity": "100",
         "price": "185.50",
-        "executed_at": datetime.now(timezone.utc).isoformat(),
+        "executed_at": datetime.now(UTC).isoformat(),
         "correlation_id": str(uuid.uuid4()),
     }
     return {
@@ -420,7 +420,7 @@ def make_trade_event():
             "side": "BUY",
             "quantity": Decimal("100"),
             "price": Decimal("185.50"),
-            "executed_at": datetime.now(timezone.utc).isoformat(),
+            "executed_at": datetime.now(UTC).isoformat(),
             "correlation_id": str(uuid.uuid4()),
         }
         defaults.update(overrides)
@@ -435,7 +435,7 @@ def make_market_data_record():
         defaults = {
             "source_id": "bloomberg-feed-1",
             "instrument_id": "AAPL",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "event_type": "TRADE",
             "price": 185.50,
             "volume": 1000,

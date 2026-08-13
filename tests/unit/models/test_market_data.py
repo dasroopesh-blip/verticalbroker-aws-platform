@@ -4,7 +4,7 @@ Tests: MarketDataRaw, MarketDataSilver, DailyTradeSummaryGold dataclasses.
 """
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
@@ -21,13 +21,13 @@ class TestMarketDataRaw:
         raw = {
             "source_id": "bloomberg-feed-1",
             "instrument_id": "AAPL",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "event_type": "TRADE",
             "price": 185.50,
             "volume": 1000,
             "exchange": "NYSE",
             "schema_version": "1.0",
-            "ingestion_timestamp": datetime.now(timezone.utc).isoformat(),
+            "ingestion_timestamp": datetime.now(UTC).isoformat(),
             "partition_key": "AAPL",
         }
         required_fields = [
@@ -45,7 +45,7 @@ class TestMarketDataRaw:
     def test_raw_includes_ingestion_metadata(self):
         """Raw records include ingestion_timestamp and partition_key."""
         raw = {
-            "ingestion_timestamp": datetime.now(timezone.utc).isoformat(),
+            "ingestion_timestamp": datetime.now(UTC).isoformat(),
             "partition_key": "AAPL",
         }
         assert "ingestion_timestamp" in raw
@@ -81,7 +81,7 @@ class TestMarketDataSilver:
             "quality_score": 95.5,
             "quality_flags": [],
             "is_valid": True,
-            "validated_at": datetime.now(timezone.utc).isoformat(),
+            "validated_at": datetime.now(UTC).isoformat(),
         }
         assert silver["is_valid"] is True
         assert silver["quality_score"] > 0
@@ -128,7 +128,7 @@ class TestDailyTradeSummaryGold:
 
     def test_gold_vwap_calculation(self):
         """Gold includes VWAP (Volume-Weighted Average Price)."""
-        # VWAP = Σ(price × volume) / Σ(volume)
+        # VWAP = sum(price * volume) / sum(volume)
         trades = [
             {"price": Decimal("185.00"), "volume": Decimal("10000")},
             {"price": Decimal("186.00"), "volume": Decimal("20000")},

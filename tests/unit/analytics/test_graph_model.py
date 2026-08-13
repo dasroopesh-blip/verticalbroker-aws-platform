@@ -4,7 +4,7 @@ Tests: Vertex/edge creation, Gremlin query building, fraud detection queries.
 """
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
@@ -87,7 +87,7 @@ class TestEdgeModels:
                 "side": "BUY",
                 "quantity": 100,
                 "price": 185.50,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
             },
         }
         assert edge["label"] == "TRADED"

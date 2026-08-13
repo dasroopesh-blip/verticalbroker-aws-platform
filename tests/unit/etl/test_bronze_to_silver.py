@@ -4,7 +4,7 @@ Tests: Schema validation, deduplication, data quality abort, Parquet write, line
 """
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from unittest.mock import MagicMock, patch
 

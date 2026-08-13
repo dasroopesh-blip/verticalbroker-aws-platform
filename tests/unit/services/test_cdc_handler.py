@@ -3,10 +3,8 @@ Unit tests for CDC (Change Data Capture) handler.
 Tests: Schema evolution detection, DMS event processing.
 """
 
-import json
 import uuid
-from datetime import datetime, timezone
-from unittest.mock import MagicMock, patch
+from datetime import UTC, datetime
 
 import pytest
 
@@ -24,7 +22,7 @@ class TestCDCHandler:
                 "operation": "insert",
                 "schema-name": "public",
                 "table-name": "orders",
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
             },
             "data": {
                 "order_id": str(uuid.uuid4()),
@@ -43,7 +41,7 @@ class TestCDCHandler:
                 "operation": "update",
                 "schema-name": "public",
                 "table-name": "orders",
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
             },
             "data": {"order_id": "ord-001", "status": "FILLED"},
             "before-image": {"order_id": "ord-001", "status": "PENDING"},

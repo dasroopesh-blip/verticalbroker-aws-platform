@@ -5,9 +5,8 @@ Tests: SageMaker inference, governance evaluation, FINRA compliance logging.
 
 import json
 import uuid
-from datetime import datetime, timezone
-from decimal import Decimal
-from unittest.mock import MagicMock, patch
+from datetime import UTC, datetime
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -74,8 +73,7 @@ class TestGovernanceEvaluation:
 
     def test_governance_flags_undisclosed_risk(self):
         """Governance engine flags if recommendation risk exceeds profile."""
-        risk_tolerance = "CONSERVATIVE"
-        recommended_equity_pct = 0.80  # 80% equity
+        recommended_equity_pct = 0.80  # 80% equity (CONSERVATIVE max = 40%)
         conservative_max_equity = 0.40
 
         exceeds_risk = recommended_equity_pct > conservative_max_equity
@@ -83,8 +81,7 @@ class TestGovernanceEvaluation:
 
     def test_governance_passes_within_risk(self):
         """Recommendation within risk tolerance passes governance."""
-        risk_tolerance = "AGGRESSIVE"
-        recommended_equity_pct = 0.80
+        recommended_equity_pct = 0.80  # AGGRESSIVE max = 90%
         aggressive_max_equity = 0.90
 
         exceeds_risk = recommended_equity_pct > aggressive_max_equity
@@ -95,7 +92,7 @@ class TestGovernanceEvaluation:
         compliance_log = {
             "recommendation_id": str(uuid.uuid4()),
             "client_id": "client-001",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "recommendation": "MODERATE_GROWTH",
             "confidence": 0.87,
             "governance_outcome": "APPROVED",
@@ -135,7 +132,7 @@ class TestAdvisoryEventEmission:
                 "recommendation_type": "MODERATE_GROWTH",
                 "confidence": 0.87,
                 "requires_human_review": False,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
             }),
         }
         assert event["Source"] == "verticalbroker.advisory-agent"

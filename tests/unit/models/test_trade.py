@@ -4,7 +4,7 @@ Tests: TradeEvent, OrderRequest, OrderResponse, ClientProfile, CustomerProfile d
 """
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
@@ -26,7 +26,7 @@ class TestTradeEvent:
             "side": "BUY",
             "quantity": Decimal("100"),
             "price": Decimal("185.50"),
-            "executed_at": datetime.now(timezone.utc).isoformat(),
+            "executed_at": datetime.now(UTC).isoformat(),
             "correlation_id": str(uuid.uuid4()),
         }
         assert event["side"] in ("BUY", "SELL")
@@ -100,7 +100,7 @@ class TestOrderResponse:
         response = {
             "order_id": str(uuid.uuid4()),
             "status": "ACCEPTED",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "instrument_id": "AAPL",
             "side": "BUY",
             "quantity": "100",

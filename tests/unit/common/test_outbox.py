@@ -6,7 +6,7 @@ Tests: Atomic write + event, DynamoDB transactions, unpublished event retrieval.
 import json
 import time
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock, patch
 
 import boto3
@@ -40,7 +40,7 @@ class TestTransactionalOutbox:
         event_id = str(uuid.uuid4())
         table.put_item(Item={
             "pk": f"OUTBOX#{event_id}",
-            "sk": f"EVENT#{datetime.now(timezone.utc).isoformat()}",
+            "sk": f"EVENT#{datetime.now(UTC).isoformat()}",
             "event_type": "TradeExecuted",
             "source": "verticalbroker.order-manager",
             "detail": json.dumps({"order_id": "ord-001", "status": "FILLED"}),
@@ -79,7 +79,7 @@ class TestTransactionalOutbox:
 
         order_id = str(uuid.uuid4())
         event_id = str(uuid.uuid4())
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
 
         # Atomic transaction: order + outbox event
         response = client.transact_write_items(
@@ -173,7 +173,7 @@ class TestOutboxPublishing:
             UpdateExpression="SET published = :true, published_at = :ts",
             ExpressionAttributeValues={
                 ":true": True,
-                ":ts": datetime.now(timezone.utc).isoformat(),
+                ":ts": datetime.now(UTC).isoformat(),
             },
         )
 

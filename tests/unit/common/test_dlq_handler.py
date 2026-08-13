@@ -5,7 +5,7 @@ Tests: Failed message investigation, EventBridge emission, CloudWatch metrics.
 
 import json
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
 import boto3
@@ -27,7 +27,7 @@ class TestDLQProcessor:
                 "source_id": "bloomberg-feed-1",
                 "instrument_id": "AAPL",
                 "error": "SchemaValidationError",
-                "original_timestamp": datetime.now(timezone.utc).isoformat(),
+                "original_timestamp": datetime.now(UTC).isoformat(),
             }),
             "attributes": {
                 "ApproximateReceiveCount": "4",
@@ -71,7 +71,7 @@ class TestDLQProcessor:
             "receive_count": int(message["attributes"]["ApproximateReceiveCount"]),
             "source_queue": message["eventSourceARN"].split(":")[-1],
             "body": json.loads(message["body"]),
-            "failure_timestamp": datetime.now(timezone.utc).isoformat(),
+            "failure_timestamp": datetime.now(UTC).isoformat(),
         }
 
         assert context["receive_count"] == 5
@@ -96,7 +96,7 @@ class TestDLQEventEmission:
                 "source_queue": "market-data-dlq",
                 "receive_count": 5,
                 "failure_reason": "SchemaValidationError",
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
             }),
         }
 

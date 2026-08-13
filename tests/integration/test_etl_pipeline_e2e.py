@@ -5,7 +5,7 @@ Tests: S3 Bronze → Glue/PySpark → Silver → Gold (local Spark mode).
 
 import json
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import boto3
@@ -114,7 +114,7 @@ class TestETLEventNotifications:
                 "records_processed": 10000,
                 "records_written": 9500,
                 "duration_seconds": 2700,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
             }),
         }])
         assert response["FailedEntryCount"] == 0
@@ -136,7 +136,7 @@ class TestETLEventNotifications:
                 "error_type": "DataQualityAbortError",
                 "rejection_rate": 0.35,
                 "threshold": 0.30,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
             }),
         }])
         assert response["FailedEntryCount"] == 0

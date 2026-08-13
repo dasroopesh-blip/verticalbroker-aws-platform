@@ -5,7 +5,7 @@ Tests: API GW → Order Manager → DynamoDB → EventBridge → SQS → Wallet.
 
 import json
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import boto3
@@ -41,7 +41,7 @@ class TestOrderFlowE2E:
             "quantity": Decimal("100"),
             "price": Decimal("185.50"),
             "status": "ACCEPTED",
-            "created_at": datetime.now(timezone.utc).isoformat(),
+            "created_at": datetime.now(UTC).isoformat(),
         })
 
         response = table.get_item(Key={"order_id": order_id})
@@ -75,7 +75,7 @@ class TestOrderFlowE2E:
 
         order_id = str(uuid.uuid4())
         event_id = str(uuid.uuid4())
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
 
         response = client.transact_write_items(
             TransactItems=[

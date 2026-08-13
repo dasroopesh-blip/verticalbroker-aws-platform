@@ -6,12 +6,12 @@ Tests: Kinesis batch processing, Parquet write, Glue partition, DLQ routing.
 import base64
 import json
 import uuid
-from datetime import datetime, timezone
-from unittest.mock import MagicMock, patch, ANY
+from datetime import UTC, datetime
+from unittest.mock import MagicMock, patch
 
+import boto3
 import pytest
 from moto import mock_aws
-import boto3
 
 
 pytestmark = pytest.mark.unit
@@ -136,7 +136,7 @@ class TestMarketDataHandler:
                 "s3_key": "bronze/source=bloomberg/trade_date=2024-01-15/batch.parquet",
                 "record_count": 100,
                 "size_bytes": 45000,
-                "ingestion_timestamp": datetime.now(timezone.utc).isoformat(),
+                "ingestion_timestamp": datetime.now(UTC).isoformat(),
             }
 
             assert "source_id" in event_detail
@@ -173,7 +173,7 @@ class TestMarketDataSchema:
     def test_future_timestamp_fails(self, make_market_data_record):
         """Record with timestamp in the future fails validation."""
         from datetime import timedelta
-        future = (datetime.now(timezone.utc) + timedelta(hours=2)).isoformat()
+        future = (datetime.now(UTC) + timedelta(hours=2)).isoformat()
         record = make_market_data_record(timestamp=future)
         record_ts = datetime.fromisoformat(record["timestamp"])
-        assert record_ts > datetime.now(timezone.utc)
+        assert record_ts > datetime.now(UTC)

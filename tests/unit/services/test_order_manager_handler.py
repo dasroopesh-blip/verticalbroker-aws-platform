@@ -5,7 +5,7 @@ Tests: Idempotent order submission, pre-trade validation, transactional outbox.
 
 import json
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from unittest.mock import MagicMock, patch
 
@@ -63,7 +63,7 @@ class TestOrderManagerHandler:
                 to_dict=lambda: {
                     "order_id": str(uuid.uuid4()),
                     "status": "ACCEPTED",
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "timestamp": datetime.now(UTC).isoformat(),
                 }
             )
 
@@ -79,7 +79,7 @@ class TestOrderManagerHandler:
 
     def test_duplicate_order_returns_same_response(self):
         """Same idempotency key returns cached response (no duplicate processing)."""
-        idempotency_key = str(uuid.uuid4())
+        _idempotency_key = str(uuid.uuid4())  # noqa: F841
 
         # First call creates the order
         first_response = {"order_id": "ord-001", "status": "ACCEPTED"}
@@ -151,19 +151,19 @@ class TestOrderOutbox:
         order = make_order_request()
         outbox_event = {
             "pk": f"ORDER#{uuid.uuid4()}",
-            "sk": f"EVENT#{datetime.now(timezone.utc).isoformat()}",
+            "sk": f"EVENT#{datetime.now(UTC).isoformat()}",
             "event_type": "TradeExecuted",
             "source": "verticalbroker.order-manager",
             "detail": json.dumps(order),
             "published": False,
-            "ttl": int(datetime.now(timezone.utc).timestamp()) + 7 * 86400,
+            "ttl": int(datetime.now(UTC).timestamp()) + 7 * 86400,
         }
         assert outbox_event["published"] is False
         assert "TradeExecuted" in outbox_event["event_type"]
 
     def test_outbox_ttl_is_7_days(self):
         """Outbox records expire after 7 days."""
-        now = int(datetime.now(timezone.utc).timestamp())
+        now = int(datetime.now(UTC).timestamp())
         ttl = now + (7 * 24 * 60 * 60)
         assert ttl - now == 604800  # 7 days in seconds
 
@@ -180,7 +180,7 @@ class TestOrderManagerGetOrder:
             "quantity": "100",
             "price": "185.50",
             "status": "FILLED",
-            "created_at": datetime.now(timezone.utc).isoformat(),
+            "created_at": datetime.now(UTC).isoformat(),
         }
         assert order["status"] == "FILLED"
 

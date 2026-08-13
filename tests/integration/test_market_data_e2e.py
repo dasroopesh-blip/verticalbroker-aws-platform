@@ -6,7 +6,7 @@ Tests: Kinesis → Lambda → S3 Bronze (Parquet) using LocalStack/moto.
 import base64
 import json
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
 import boto3
@@ -84,7 +84,7 @@ class TestMarketDataIngestionE2E:
             MessageBody=json.dumps({
                 "error": "SchemaValidationError",
                 "original_record": {"garbage": "data"},
-                "failed_at": datetime.now(timezone.utc).isoformat(),
+                "failed_at": datetime.now(UTC).isoformat(),
             }),
         )
 

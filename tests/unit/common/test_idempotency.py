@@ -5,7 +5,7 @@ Tests: DynamoDB persistence layer, TTL expiry, duplicate detection, config creat
 
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
 import boto3

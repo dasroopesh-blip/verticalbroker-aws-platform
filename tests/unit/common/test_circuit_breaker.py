@@ -5,7 +5,7 @@ Tests: State transitions (CLOSED→OPEN→HALF_OPEN), failure counting, recovery
 
 import time
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock, patch
 
 import boto3
@@ -93,7 +93,7 @@ class TestCircuitBreakerDynamoDB:
             "failure_count": 0,
             "success_count": 0,
             "last_failure_time": None,
-            "last_state_change": datetime.now(timezone.utc).isoformat(),
+            "last_state_change": datetime.now(UTC).isoformat(),
         })
 
         response = table.get_item(Key={"service_name": "sagemaker-endpoint"})
