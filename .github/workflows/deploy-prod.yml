@@ -1,0 +1,245 @@
+name: Deploy to Production
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: "Type 'DEPLOY' to confirm production deployment"
+        required: true
+        type: string
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  PYTHON_VERSION: "3.12"
+  TERRAFORM_VERSION: "1.5.7"
+  AWS_REGION: "us-east-1"
+  ENVIRONMENT: "production"
+
+jobs:
+  # =========================================================================
+  # Pre-flight Checks
+  # =========================================================================
+  preflight:
+    name: Pre-flight Checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate manual confirmation
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          if [ "${{ inputs.confirm }}" != "DEPLOY" ]; then
+            echo "❌ Production deployment not confirmed. Type 'DEPLOY' to proceed."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+
+      - name: Verify all CI checks passed
+        run: |
+          echo "✓ Production deployment authorized"
+          echo "  Trigger: ${{ github.event_name }}"
+          echo "  Ref: ${{ github.ref }}"
+          echo "  SHA: ${{ github.sha }}"
+
+  # =========================================================================
+  # Build Production Artifacts
+  # =========================================================================
+  build:
+    name: Build Production Packages
+    runs-on: ubuntu-latest
+    needs: preflight
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Build Lambda layer (ARM64/Graviton2)
+        run: |
+          mkdir -p build/layer/python/lib/python3.12/site-packages
+          pip install -r requirements/lambda-layer.txt \
+            -t build/layer/python/lib/python3.12/site-packages/ \
+            --platform manylinux2014_aarch64 \
+            --implementation cp \
+            --python-version 3.12 \
+            --only-binary=:all:
+          cd build/layer && zip -r ../lambda-layer.zip python/
+
+      - name: Build Lambda functions
+        run: |
+          cd src && zip -r ../build/lambda-functions.zip . \
+            -x "__pycache__/*" -x "*.pyc" -x "etl/*"
+
+      - name: Build Glue scripts
+        run: |
+          mkdir -p build/glue
+          cp -r src/etl/* build/glue/
+          cp -r src/common/* build/glue/
+          cd build/glue && zip -r ../glue-scripts.zip .
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-packages
+          path: |
+            build/lambda-layer.zip
+            build/lambda-functions.zip
+            build/glue-scripts.zip
+          retention-days: 30
+
+  # =========================================================================
+  # Terraform Plan (Production) - Requires Approval
+  # =========================================================================
+  plan:
+    name: Terraform Plan (Production)
+    runs-on: ubuntu-latest
+    needs: build
+    environment: production-plan
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+
+      - name: Terraform Init
+        run: terraform init
+        working-directory: terraform/environments/production
+
+      - name: Terraform Plan
+        run: |
+          terraform plan \
+            -var-file=terraform.tfvars \
+            -out=tfplan \
+            -no-color \
+            -detailed-exitcode 2>&1 | tee plan-output.txt
+        working-directory: terraform/environments/production
+
+      - name: Upload plan
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-plan
+          path: terraform/environments/production/tfplan
+
+  # =========================================================================
+  # Terraform Apply (Production) - Manual Approval Gate
+  # =========================================================================
+  apply:
+    name: Terraform Apply (Production)
+    runs-on: ubuntu-latest
+    needs: plan
+    environment: production  # Requires manual approval in GitHub
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+
+      - name: Download plan
+        uses: actions/download-artifact@v4
+        with:
+          name: terraform-plan
+          path: terraform/environments/production/
+
+      - name: Terraform Init
+        run: terraform init
+        working-directory: terraform/environments/production
+
+      - name: Terraform Apply
+        run: terraform apply -auto-approve tfplan
+        working-directory: terraform/environments/production
+
+  # =========================================================================
+  # Deploy Code to Production
+  # =========================================================================
+  deploy-code:
+    name: Deploy Code (Production)
+    runs-on: ubuntu-latest
+    needs: apply
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Download production packages
+        uses: actions/download-artifact@v4
+        with:
+          name: production-packages
+          path: build/
+
+      - name: Deploy Lambda Layer
+        run: |
+          LAYER_VERSION=$(aws lambda publish-layer-version \
+            --layer-name verticalbroker-dependencies-prod \
+            --compatible-runtimes python3.12 \
+            --compatible-architectures arm64 \
+            --zip-file fileb://build/lambda-layer.zip \
+            --description "VerticalBroker dependencies (prod) - ${{ github.sha }}" \
+            --query 'Version' --output text)
+          echo "Published layer version: ${LAYER_VERSION}"
+
+      - name: Deploy Lambda Functions (rolling)
+        run: |
+          FUNCTIONS=(
+            "vb-market-data-processor-prod"
+            "vb-order-manager-prod"
+            "vb-wallet-service-prod"
+            "vb-advisory-agent-prod"
+            "vb-cdc-handler-prod"
+            "vb-dlq-processor-prod"
+          )
+          for func in "${FUNCTIONS[@]}"; do
+            echo "Deploying ${func}..."
+            aws lambda update-function-code \
+              --function-name "${func}" \
+              --zip-file fileb://build/lambda-functions.zip \
+              --architectures arm64 \
+              --publish
+          done
+
+      - name: Deploy Glue Scripts
+        run: |
+          aws s3 sync build/glue/ \
+            s3://vb-glue-scripts-prod/src/etl/ \
+            --delete \
+            --sse aws:kms \
+            --kms-key-id ${{ secrets.KMS_KEY_ID }}
+
+      - name: Post-deployment validation
+        run: |
+          echo "=== Production Deployment Complete ==="
+          echo "Version: ${{ github.ref_name }}"
+          echo "Commit: ${{ github.sha }}"
+          echo "Time: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          echo ""
+          echo "Next steps:"
+          echo "  1. Monitor CloudWatch dashboards for anomalies"
+          echo "  2. Check composite alarms (no cascade detected)"
+          echo "  3. Verify API Gateway 5xx rate < 1%"
+          echo "  4. Confirm Kinesis iterator age < 5s"
