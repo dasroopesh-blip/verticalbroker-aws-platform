@@ -57,15 +57,16 @@ graph TB
         MDS[Market Data Service Lambda<br/>Kinesis triggered]
         DDB[(DynamoDB<br/>Idempotency + State)]
         AURORA[(Aurora PostgreSQL<br/>ACID Ledger Truth)]
+        TPL[Trade Processor Lambda<br/>SQS FIFO Consumer<br/>ReportBatchItemFailures]
     end
 
     subgraph "Lane 2: Event + Lakehouse"
         KDS[Kinesis Data Streams<br/>16 shards, 12K rec/sec burst]
-        KDF[Kinesis Data Firehose<br/>Delivery Stream<br/>JSON→Parquet, 60s buffer]
+        KDF[Kinesis Data Firehose<br/>Delivery Stream<br/>JSON to Parquet, 60s buffer]
         EB[EventBridge<br/>Event Bus]
         SQS[SQS FIFO<br/>Trade Ordering<br/>MessageGroupId=customer_id]
         SQSDLQ[SQS FIFO DLQ<br/>maxReceiveCount=5<br/>14-day retention]
-        SF[Step Functions<br/>Orchestrator<br/>Bronze→Silver→Gold]
+        SF[Step Functions<br/>Orchestrator<br/>Bronze to Silver to Gold]
         GLUE[Glue PySpark<br/>ETL Engine<br/>G.2X workers]
         S3B[(S3 Bronze<br/>Raw/Immutable<br/>Parquet partitioned)]
         S3S[(S3 Silver<br/>Validated/Deduped<br/>DecimalType)]
@@ -113,6 +114,10 @@ graph TB
     OM --> EB
     MDS --> EB
 
+    %% SQS FIFO feeds Trade Processor Lambda (Event Source Mapping)
+    SQS --> TPL
+    TPL --> DDB
+
     %% Lane 2: Market data streaming path (Kinesis → Firehose → S3 Bronze)
     KDS --> KDF
     KDF --> S3B
@@ -120,9 +125,6 @@ graph TB
     %% Lane 2: Event-driven trade processing path
     EB --> SQS
     SQS --> SQSDLQ
-    SQS --> TPL[Trade Processor Lambda<br/>ReportBatchItemFailures<br/>Decimal math + Idempotency]
-    TPL --> DDB
-    TPL --> S3B
     EB --> SF
 
     %% Lane 2: ETL orchestration (Step Functions → Glue → Bronze/Silver/Gold)
