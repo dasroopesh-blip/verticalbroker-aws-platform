@@ -54,22 +54,25 @@ graph TB
         COG[Cognito<br/>Identity Service]
         OM[Order Manager<br/>Lambda]
         WS[Wallet Service<br/>Lambda]
-        MDS[Market Data Service Lambda - Kinesis triggered]
+        MDS[Market Data Service Lambda<br/>Kinesis triggered]
         DDB[(DynamoDB<br/>Idempotency + State)]
         AURORA[(Aurora PostgreSQL<br/>ACID Ledger Truth)]
     end
 
     subgraph "Lane 2: Event + Lakehouse"
-        KDS[Kinesis Data Streams<br/>12K rec/sec burst]
+        KDS[Kinesis Data Streams<br/>16 shards, 12K rec/sec burst]
+        KDF[Kinesis Data Firehose<br/>Delivery Stream<br/>JSON→Parquet, 60s buffer]
         EB[EventBridge<br/>Event Bus]
-        SQS[SQS FIFO<br/>Trade Ordering]
-        SF[Step Functions<br/>Orchestrator]
-        GLUE[Glue PySpark<br/>ETL Engine]
-        S3B[(S3 Bronze<br/>Raw/Immutable)]
-        S3S[(S3 Silver<br/>Parquet/Validated)]
-        S3G[(S3 Gold<br/>Aggregated)]
+        SQS[SQS FIFO<br/>Trade Ordering<br/>MessageGroupId=customer_id]
+        SQSDLQ[SQS FIFO DLQ<br/>maxReceiveCount=5<br/>14-day retention]
+        SF[Step Functions<br/>Orchestrator<br/>Bronze→Silver→Gold]
+        GLUE[Glue PySpark<br/>ETL Engine<br/>G.2X workers]
+        S3B[(S3 Bronze<br/>Raw/Immutable<br/>Parquet partitioned)]
+        S3S[(S3 Silver<br/>Validated/Deduped<br/>DecimalType)]
+        S3G[(S3 Gold<br/>Aggregated/KPIs)]
+        S3DL[(S3 Dead Letter<br/>Failed records)]
         CAT[Glue Data Catalog]
-        DMS[DMS CDC Pipeline]
+        DMS[DMS CDC Pipeline<br/>from Aurora]
     end
 
     subgraph "Lane 3: ML + Consumption"
@@ -82,19 +85,22 @@ graph TB
         AA[Advisory Agent<br/>Lambda]
     end
 
-    subgraph "Cross-Cutting"
-        KMS[KMS<br/>Encryption]
-        CW[CloudWatch + X-Ray<br/>Observability]
-        CT[CloudTrail<br/>Audit]
+    subgraph "Cross-Cutting: Observability + Security"
+        KMS[KMS<br/>Encryption at Rest]
+        CW[CloudWatch Alarms<br/>+ X-Ray Tracing]
+        CT[CloudTrail<br/>API Audit]
         GD[GuardDuty<br/>Threat Detection]
         LF[Lake Formation<br/>Data Governance]
+        SNS[SNS<br/>PagerDuty Alerts]
     end
 
+    %% External → Ingestion
     BB --> KDS
     TR --> KDS
     CS --> APIGW
     TA --> APIGW
 
+    %% Lane 1: Transactional flow
     APIGW --> COG
     APIGW --> OM
     APIGW --> WS
@@ -107,19 +113,32 @@ graph TB
     OM --> EB
     MDS --> EB
 
-    KDS --> S3B
+    %% Lane 2: Market data streaming path (Kinesis → Firehose → S3 Bronze)
+    KDS --> KDF
+    KDF --> S3B
+
+    %% Lane 2: Event-driven trade processing path
     EB --> SQS
+    SQS --> SQSDLQ
     EB --> SF
+
+    %% Lane 2: ETL orchestration (Step Functions → Glue → Bronze/Silver/Gold)
     SF --> GLUE
     GLUE --> S3B
     GLUE --> S3S
     GLUE --> S3G
+    GLUE -.-> S3DL
+
+    %% Lane 2: Catalog registration
     S3B --> CAT
     S3S --> CAT
     S3G --> CAT
-    DMS --> S3B
-    AURORA --> DMS
 
+    %% Lane 2: CDC from Aurora → Bronze
+    AURORA --> DMS
+    DMS --> S3B
+
+    %% Lane 3: Consumption from Gold
     S3G --> OS
     S3G --> NEP
     S3G --> ATH
@@ -127,7 +146,20 @@ graph TB
     SM --> MR
     MR --> SME
     SME --> AA
+
+    %% Cross-cutting: Monitoring
+    CW --> SNS
+    SQSDLQ -.-> CW
 ```
+
+> **Architecture Corrections (v2):**
+> 1. Added **Kinesis Data Firehose** between Kinesis Data Streams and S3 Bronze — Kinesis Streams cannot write directly to S3; Firehose handles buffering (60s/5MB), format conversion (JSON→Parquet), and time-based partitioning.
+> 2. Added **SQS FIFO DLQ** with `maxReceiveCount=5` — poison messages must be quarantined after exhausting retries, not left in the main queue blocking the MessageGroup.
+> 3. Added **S3 Dead Letter bucket** for Glue ETL failures — malformed records that fail Bronze/Silver validation are written here for investigation.
+> 4. Added **SNS** to Cross-Cutting for alerting — CloudWatch Alarms → SNS → PagerDuty.
+> 5. Clarified **DMS source** as Aurora PostgreSQL (the ACID ledger).
+> 6. Added component details (shard count, worker type, MessageGroupId, buffer config) for precision.
+> 7. Added **Step Functions description** showing it orchestrates Bronze→Silver→Gold sequentially.
 
 
 
@@ -230,11 +262,18 @@ graph TB
 
 #### Market Data Ingestion Service (LLD)
 
+> **Data Flow Clarification:** Thomson Reuters and Bloomberg push market data into Kinesis Data Streams. The stream has **two consumers**:
+> 1. **Lambda (MarketDataProcessor)** — real-time processing, validation, and event emission
+> 2. **Kinesis Data Firehose** — automatic delivery to S3 Bronze as Parquet micro-batches (60-second buffer)
+>
+> Kinesis Data Streams **cannot** write directly to S3. Firehose acts as the delivery mechanism, handling buffering, format conversion (JSON→Parquet), compression (Snappy), and time-based partitioning automatically.
+
 ```mermaid
 sequenceDiagram
     participant BB as Bloomberg B-Pipe
     participant TR as Thomson Reuters
     participant KDS as Kinesis Data Streams
+    participant KDF as Kinesis Data Firehose
     participant LMD as Lambda: MarketDataProcessor
     participant S3B as S3 Bronze Layer
     participant CAT as Glue Data Catalog
@@ -243,15 +282,21 @@ sequenceDiagram
 
     BB->>KDS: Push market data records
     TR->>KDS: Push market data records
-    KDS->>LMD: Batch invoke (100 records/batch)
-    LMD->>LMD: Validate schema + enrich metadata
-    alt Valid Record
-        LMD->>S3B: PutObject (Parquet micro-batch)
-        LMD->>CAT: UpdatePartition
-        LMD->>EB: Emit data.ingested event
-    else Malformed Record
-        LMD->>DLQ: SendMessage (dead-letter)
-        LMD->>EB: Emit pipeline.error event
+    
+    par Consumer 1: Real-time Lambda
+        KDS->>LMD: Batch invoke (100 records/batch)
+        LMD->>LMD: Validate schema + enrich metadata
+        alt Valid Record
+            LMD->>CAT: UpdatePartition
+            LMD->>EB: Emit data.ingested event
+        else Malformed Record
+            LMD->>DLQ: SendMessage (dead-letter)
+            LMD->>EB: Emit pipeline.error event
+        end
+    and Consumer 2: Firehose → S3 (bulk delivery)
+        KDS->>KDF: Enhanced fan-out (dedicated throughput)
+        KDF->>KDF: Buffer 60s/5MB, convert JSON→Parquet
+        KDF->>S3B: PutObject (partitioned by time)
     end
 ```
 
@@ -627,11 +672,25 @@ graph LR
 
 | Queue | Type | Visibility Timeout | Retention | Max Receive | DLQ |
 |-------|------|-------------------|-----------|-------------|-----|
-| trade-processing.fifo | FIFO | 30s | 14 days | 5 | trade-processing-dlq.fifo |
-| market-data-buffer | Standard | 60s | 14 days | 3 | market-data-dlq |
+| trade-processing.fifo | FIFO | 360s (6× Lambda timeout) | 14 days | 5 | trade-processing-dlq.fifo |
+| market-data-buffer | Standard | 360s (6× Lambda timeout) | 14 days | 3 | market-data-dlq |
 | etl-trigger | Standard | 300s | 4 days | 3 | etl-trigger-dlq |
-| advisory-requests | Standard | 30s | 4 days | 5 | advisory-dlq |
-| compliance-events | FIFO | 60s | 14 days | 5 | compliance-dlq.fifo |
+| advisory-requests | Standard | 180s (6× Lambda timeout) | 4 days | 5 | advisory-dlq |
+| compliance-events | FIFO | 360s (6× Lambda timeout) | 14 days | 5 | compliance-dlq.fifo |
+
+> **Note:** Visibility timeout must be ≥ 6× the consuming Lambda's timeout. If visibility timeout < Lambda timeout, SQS makes the message visible again while Lambda is still processing it, causing **duplicate execution**. The 6× multiplier accounts for Lambda retries + SQS batch processing overhead.
+
+**SQS FIFO Ordering Semantics:**
+
+| Parameter | Value | Purpose |
+|-----------|-------|---------|
+| MessageGroupId | `customer_id` | All trades for same customer processed in order |
+| MessageDeduplicationId | `request_id` | 5-minute dedup window at queue level |
+| ContentBasedDeduplication | Disabled | Explicit dedup ID required (more reliable) |
+| FunctionResponseTypes | `["ReportBatchItemFailures"]` | Partial batch failure reporting |
+| BatchSize | 10 | Maximum for FIFO (not 10,000 like Standard) |
+
+> **Critical FIFO behavior:** If message 3 in a MessageGroup fails, messages 4 and 5 in the **same group** are blocked until message 3 succeeds or routes to DLQ. This maintains ordering guarantees per customer but means one failing message can block an entire customer's queue.
 
 
 
