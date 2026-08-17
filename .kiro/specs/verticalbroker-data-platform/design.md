@@ -120,6 +120,9 @@ graph TB
     %% Lane 2: Event-driven trade processing path
     EB --> SQS
     SQS --> SQSDLQ
+    SQS --> TPL[Trade Processor Lambda<br/>ReportBatchItemFailures<br/>Decimal math + Idempotency]
+    TPL --> DDB
+    TPL --> S3B
     EB --> SF
 
     %% Lane 2: ETL orchestration (Step Functions → Glue → Bronze/Silver/Gold)
