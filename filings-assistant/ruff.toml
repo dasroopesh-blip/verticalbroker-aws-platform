@@ -1,0 +1,22 @@
+# Ruff configuration — matches the VerticalBroker platform conventions
+# (120-char lines, py312) so code style is consistent across both repos.
+line-length = 120
+target-version = "py312"
+
+[lint]
+select = [
+    "E",   # pycodestyle errors
+    "F",   # pyflakes
+    "I",   # isort (import ordering)
+    "N",   # pep8-naming
+    "UP",  # pyupgrade
+    "B",   # flake8-bugbear
+    "C4",  # flake8-comprehensions
+    "SIM", # flake8-simplify
+]
+ignore = [
+    "E501", # line length handled by black
+]
+
+[lint.isort]
+known-first-party = ["filings_assistant"]

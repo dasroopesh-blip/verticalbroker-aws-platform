@@ -1,0 +1,50 @@
+# Local development stack for filings-assistant ($0 — runs entirely on your machine).
+#
+#   docker compose -f docker/docker-compose.yml up -d
+#
+# Provides:
+#   - opensearch : vector + text search (single node, security disabled for dev)
+#   - postgres   : source-of-truth store for raw filings + ingest status
+#
+# With these up and FA_RUN_MODE=aws pointed at localhost, the pipeline uses real
+# OpenSearch + Postgres locally. With FA_RUN_MODE=local everything is in-memory
+# and you don't even need this stack — handy for quick tests.
+services:
+  opensearch:
+    image: opensearchproject/opensearch:2.13.0
+    container_name: fa-opensearch
+    environment:
+      - discovery.type=single-node
+      - bootstrap.memory_lock=true
+      - "OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m"
+      # Dev only: disable the security plugin so no TLS/certs are needed locally.
+      - DISABLE_SECURITY_PLUGIN=true
+      - DISABLE_INSTALL_DEMO_CONFIG=true
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    ports:
+      - "9200:9200"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: fa-postgres
+    environment:
+      - POSTGRES_USER=fa_admin
+      - POSTGRES_PASSWORD=local_dev_only
+      - POSTGRES_DB=filings
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./init-postgres.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fa_admin -d filings"]
+      interval: 10s
+      timeout: 5s
+      retries: 10

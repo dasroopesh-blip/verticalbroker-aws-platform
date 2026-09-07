@@ -1,0 +1,28 @@
+# Copy to dev.tfvars and adjust. dev.tfvars is gitignored (may contain emails).
+# LEARNING NOTE: a *.tfvars file supplies values for the variables in
+# variables.tf. Run: terraform plan -var-file=environments/dev.tfvars
+
+project     = "filings-assistant"
+environment = "dev"
+aws_region  = "us-east-1"
+
+# Cheapest dev sizing. Bump these for staging/prod.
+opensearch_instance_type  = "t3.small.search"
+opensearch_instance_count = 1
+db_instance_class         = "db.t3.micro"
+
+# Cost guardrail — you get emailed at 50% and 90% of this.
+monthly_budget_usd = 150
+budget_alert_email = "you@example.com"
+
+# Bedrock model IDs (verify availability in your region + enable model access).
+bedrock_reasoning_model_id = "anthropic.claude-3-5-sonnet-20240620-v1:0"
+bedrock_embedding_model_id = "amazon.titan-embed-text-v2:0"
+
+# SageMaker reranker (Stage 2 ranking). Off by default — the app falls back to
+# fused ranking / local reranker. To enable, package a cross-encoder model to S3
+# and set the image + artifact URIs below.
+enable_reranker         = false
+# reranker_model_data_url = "s3://your-bucket/rerankers/model.tar.gz"
+# reranker_image_uri      = "763104351884.dkr.ecr.us-east-1.amazonaws.com/huggingface-pytorch-inference:2.1-transformers4.37-cpu-py310-ubuntu22.04"
+# reranker_instance_type  = "ml.m5.large"
