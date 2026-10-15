@@ -3,7 +3,7 @@
 #
 # Read top-to-bottom, it IS the architecture:
 #   search content (S3)  ->  vector index (AOSS)  ->  RAG (Bedrock KB)  ->  Ask API
-#                                                          \-> Agent (optional, Opt 3)
+#                                                          \-> Agent (optional, Opt 2)
 #   observability wraps everything (dashboard, alarms, budget).
 #
 # NOTE: module internals are intentionally stubbed in this skeleton (resources are

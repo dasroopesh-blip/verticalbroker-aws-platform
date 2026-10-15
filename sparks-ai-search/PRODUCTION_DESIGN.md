@@ -17,7 +17,7 @@
 | Search-content store | **Amazon S3** (versioned, SSE-KMS) `s3://sparks-ai-search-content-<env>/<domain>/<uniqueId>.json` | Durable, cheap, auditable |
 | Data tap | **Read-only** extractor over `sparks.open_search_json` outbox | Zero change to existing pipeline |
 | API | **API Gateway (REST, private) + Lambda** `/ask`, `/ask/stream`, `/health` | Standard, authorizable, throttleable |
-| Agent (Opt 3) | **Amazon Bedrock Agents** with Action Groups = approved tool Lambdas | Managed orchestration; no raw SQL |
+| Agent (Opt 2) | **Amazon Bedrock Agents** with Action Groups = approved tool Lambdas | Managed orchestration; no raw SQL |
 | Guardrails | **Amazon Bedrock Guardrails** (denied topics, PII, grounding) | Federal safety posture |
 | IaC | **Terraform**, modular, per-env (`dev` first) | Team standard; reproducible; destroyable |
 | Networking | All in **VPC**; AOSS + Lambda via **VPC endpoints**; API GW **private** | No public data plane |
@@ -183,7 +183,7 @@ Dashboards: one CloudWatch dashboard per env (latency, tokens, cost, freshness, 
 
 ---
 
-## 12. Confir--before-apply checklist (the only remaining unknowns)
+## 12. Confirm-before-apply checklist (the only remaining unknowns)
 
 - [ ] AWS region + VPC/subnets/SG for the AI stack
 - [ ] Bedrock model IDs enabled in the account (Claude + Titan Embeddings)
