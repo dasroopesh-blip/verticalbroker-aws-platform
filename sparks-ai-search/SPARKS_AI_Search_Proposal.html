@@ -25,187 +25,213 @@ a { color: var(--blue); }
   a { color:#222; text-decoration:none; }
 }
 </style></head><body><h1>SPARKS AI Search — Proposal</h1>
-<p><strong>Prepared for:</strong> NARB internal review → FED Lead</p>
-<p><strong>Prepared by:</strong> Vertical Relevance</p>
-<p><strong>Jira:</strong> SB-6562 — research &amp; identify options to enable prompt searching</p>
-<p><strong>Status:</strong> Draft for internal (NARB) review before presenting to FED</p>
-<p><strong>Scope:</strong> Add an AI-assisted "Ask SPARKS" search experience <strong>without changing</strong> the existing OpenSearch search.</p>
-<p><strong>Cost posture:</strong> This is <strong>research &amp; proposal only — $0 AWS cost now.</strong> No Bedrock/vector/Lambda is provisioned; spend begins <strong>only after FED Lead approval</strong>, starting with a capped Dev pilot. (See <code>COST_EFFORT_RESOURCES.md</code>.)</p>
-<p><strong>Acceptance criteria (from SB-6562) → where satisfied:</strong></p>
+<p><strong>SB-6562 — Research and identify options to enable prompt-based search</strong></p>
+<p>Refined design for NARB internal review → FED Lead</p>
+<blockquote><strong>Scope:</strong> Research and proposal only. Add AI-assisted search capabilities <strong>without changing</strong> the existing OpenSearch indexing pipeline or operational PostgreSQL schema.</blockquote>
+<blockquote><strong>Cost posture:</strong> No AWS resources are provisioned under this analysis. Any Dev implementation, model usage, vector storage, or other spend begins <strong>only after approval</strong> and cost controls are agreed.</blockquote>
+<hr/>
+<h2>1. Executive Summary</h2>
+<p>SPARKS already has a reliable structured search capability backed by Amazon OpenSearch. The current solution is optimized for keyword search, pills/filters, identifiers, and other structured lookups. The opportunity is to add natural-language search, semantic retrieval, summaries, similar-case discovery, follow-up questions, and grounded answers with links back to SPARKS records.</p>
+<p>This proposal narrows the AI choices to two practical architectures:</p>
+<ul>
+<li><strong>Option 1 — Generative AI / RAG Search:</strong> a separate retrieval-augmented generation path over a curated and optionally enriched copy of approved SPARKS data.</li>
+<li><strong>Option 2 — Agentic Hybrid Search:</strong> an orchestration layer that can choose among approved search tools, including the existing OpenSearch search, semantic/vector retrieval, and read-only record lookups.</li>
+</ul>
+<blockquote><strong>Recommendation:</strong> Present both options to FED, with <strong>Option 1</strong> as the lower-complexity near-term path and <strong>Option 2</strong> as the advanced evolution for multi-step questions. Neither option requires changes to the current RDS→SQS→OpenSearch indexing pipeline.</blockquote>
+<h3>What was refined from the initial draft</h3>
 <table>
-<tr><th>Criterion</th><th>Artifact</th></tr>
-<tr><td>ER Diagram for SPARKS</td><td><code>diagrams/sparks-er-current-asis.drawio</code> (as-is, for reference) <strong>and</strong> <code>diagrams/sparks-er-option1-2-proposed.drawio</code> (proposed data model for Option 1 &amp; 2 — the one to review)</td></tr>
-<tr><td>Research Content Documentation</td><td><code>HLD.md</code>, <code>LLD.md</code>, <code>diagrams/*</code></td></tr>
-<tr><td>Proposal Documents</td><td>this <code>PROPOSAL.md</code> + <code>SPARKS_AI_Search_Proposal.docx</code> / <code>.html</code></td></tr>
-<tr><td>NO COST in AWS</td><td><code>COST_EFFORT_RESOURCES.md</code> §0 (NO-COST-NOW)</td></tr>
+<tr><th>Refinement</th><th>Why it matters</th></tr>
+<tr><td>Removed over-claims</td><td>The initial draft described the design as "production-ready," referenced deployable Terraform, and implied locked decisions. Those claims are not required for a research/proposal Jira and should be proven separately before FED review.</td></tr>
+<tr><td>Corrected source-data assumptions</td><td>Existing search JSON is useful and often rich, but it is not automatically a complete AI search content set. The AI design now supports reuse, enrichment, or new AI-specific domain documents where current search JSON has gaps.</td></tr>
+<tr><td>Separated RAG from Agentic behavior</td><td>Option 1 is fixed retrieval + generation. Tool selection, multi-step planning, and combining existing OpenSearch with vector retrieval belong in Option 2.</td></tr>
+<tr><td>Corrected identifier language</td><td>The consumer can derive stable document IDs; not every source document should be assumed to already carry a universal <code>uniqueId</code>. The AI search content should preserve a stable source key that maps back to SPARKS.</td></tr>
+<tr><td>Simplified FED decision points</td><td>The refined proposal focuses on business value, architecture boundaries, data strategy, governance, and decisions needed before any implementation.</td></tr>
 </table>
 <hr/>
-<h2>Table of contents</h2>
+<h2>2. Current State — As-Is Search</h2>
+<p>The existing indexing flow is intentionally retained as the baseline. It uses PostgreSQL functions to create denormalized domain JSON, stages the payload in <code>sparks.open_search_json</code>, uses SQS as transport, and indexes the documents into Amazon OpenSearch.</p>
+<h3>Exact sequence and state logic</h3>
 <ol>
-<li><a href="#1-executive-summary">Executive summary</a></li>
-<li><a href="#2-current-state-as-is">Current state (As-Is)</a></li>
-<li><a href="#3-the-opportunity--guiding-principles">The opportunity &amp; guiding principles</a></li>
-<li><a href="#4-option-1--generative-ai--rag-search">Option 1 — Generative AI / RAG Search</a></li>
-<li><a href="#5-option-2--agentic-hybrid-search">Option 2 — Agentic Hybrid Search</a></li>
-<li><a href="#6-options-compared-and-what-we-deferred">Options compared (and what we deferred)</a></li>
-<li><a href="#7-high-level-design-hld">High-Level Design (HLD)</a></li>
-<li><a href="#8-low-level-design-lld">Low-Level Design (LLD)</a></li>
-<li><a href="#9-recommendation--phased-roadmap">Recommendation &amp; phased roadmap</a></li>
-<li><a href="#10-open-questions-for-fed">Open questions for FED</a></li>
-<li><a href="#11-appendix--diagrams--source-grounding">Appendix — diagrams &amp; source grounding</a></li>
+<li>An EventBridge schedule invokes the RDS-to-SQS Lambda on its configured cadence.</li>
+<li>The Lambda calls <code>sparks.pushIndexToOpenSearchTable()</code>, which invokes the domain JSON builders and <code>pushJsonData()</code>.</li>
+<li><code>pushJsonData()</code> inserts or updates <code>sparks.open_search_json</code> and resets <code>osj_read_yn=false</code> and <code>osj_processed_yn=false</code> for new/changed content.</li>
+<li>The RDS-to-SQS Lambda selects unread rows, sends SQS messages containing the <code>osj_id</code> and target index name, then marks successfully queued rows <code>osj_read_yn=true</code>.</li>
+<li>The SQS-to-OpenSearch Lambda receives the message, reads <code>osj_json_data</code> back from PostgreSQL by <code>osj_id</code>, normalizes the payload, assigns stable document IDs, and bulk-indexes it into the target OpenSearch index.</li>
+<li>After indexing, the consumer marks <code>osj_processed_yn=true</code>. <code>pushJsonData()</code> also contains retry logic for rows that are read but remain unprocessed beyond the configured threshold.</li>
 </ol>
-<hr/>
-<h2>1. Executive summary</h2>
-<p>SPARKS today has a strong <strong>structured search</strong> (keyword + pills/filters) backed by Amazon OpenSearch. It answers "find records that match these fields" very well, but it cannot answer natural-language questions, summarize across records, find semantically similar cases, or support follow-up questions.</p>
-<p>We propose adding a single <strong>"Ask SPARKS" chat box</strong> to the existing search experience. It is <strong>one user experience with two retrieval capabilities behind it</strong> — not a second search bar:</p>
-<ul>
-<li><strong>Exact / filtered lookups</strong> keep using today's OpenSearch (unchanged).</li>
-<li><strong>Natural-language / semantic questions</strong> use a new AI path.</li>
-</ul>
-<p>The design is deliberately kept <strong>simple and cost-bounded</strong> — the current search is simple and reliable, and we are *extending* it with AI, not rebuilding it.</p>
-<p>We present two AI options, both delivered as the same chat box:</p>
 <table>
-<tr><th>Option</th><th>What it is</th><th>Best for</th></tr>
-<tr><td><strong>Option 1 — Generative AI (RAG)</strong></td><td>Retrieve from a curated copy of SPARKS data; <strong>Claude</strong> generates a grounded answer with citations</td><td>Q&amp;A, summaries, "find similar cases," follow-ups</td></tr>
-<tr><td><strong>Option 2 — Agentic AI</strong></td><td>An <strong>agent</strong> decides which approved tools to call (existing OpenSearch, vector search, record lookups), reasons across steps, then answers</td><td>Complex, multi-step questions</td></tr>
+<tr><th>State</th><th>Meaning</th></tr>
+<tr><td><code>read=false, processed=false</code></td><td>New or changed JSON is staged and waiting to be queued.</td></tr>
+<tr><td><code>read=true, processed=false</code></td><td>The row was handed to SQS and is awaiting / undergoing downstream indexing.</td></tr>
+<tr><td><code>read=true, processed=true</code></td><td>The row completed the OpenSearch indexing path.</td></tr>
 </table>
-<p><strong>Key design decision:</strong> the AI path reads the <strong>same denormalized documents</strong> SPARKS already produces for OpenSearch (the <code>sparks.open_search_json</code> outbox), <strong>read-only</strong>. Nothing in the current indexing pipeline changes. This directly answers "why two searches?" — there is one search experience; the AI simply reads an approved copy of the same data.</p>
-<p><strong>Recommendation:</strong> start with <strong>Option 1 (RAG)</strong> as the near-term, governable capability, architected so <strong>Option 2 (Agentic)</strong> is an additive evolution that reuses the same search content and the existing OpenSearch as a tool. See §9.</p>
-<blockquote><strong>Delivery status:</strong> Both options are specified <strong>end-to-end and production-ready</strong> — SPARKS owns the full stack (no external dependency). Locked architecture decisions, API spec, security/IAM, observability/SLOs, CI/CD, rollback, and a go-live runbook are in <code>PRODUCTION_DESIGN.md</code>; deployable <strong>Terraform</strong> is in <code>infra/terraform/</code> (one toggle switches Option 1 ↔ Option 2). Nothing is provisioned until FED approval.</blockquote>
-<blockquote><strong>EDMAS note:</strong> EDMAS (a sister NHTSA/DOT project) already runs a GenAI/RAG search on Bedrock. Per the latest EDMAS–SPARKS exchange, EDMAS is <strong>not</strong> expected to host any Vector DB / AI capability for SPARKS, and neither team works directly on the other's tasks — so this proposal is scoped for <strong>SPARKS to own its own AI stack</strong>, which matches that note. An upcoming EDMAS meeting *may* let us reuse some EDMAS AI components; if so, that would <strong>reduce</strong> our build footprint. We treat EDMAS as a knowledge-exchange checkpoint, <strong>not a dependency</strong>.</blockquote>
-<hr/>
-<h2>2. Current state (As-Is)</h2>
-<blockquote><strong>Diagram:</strong> <code>diagrams/current-sparks-search.drawio</code></blockquote>
-<p>SPARKS keeps OpenSearch populated with a scheduled, outbox-based indexing pipeline, and the UI searches that index.</p>
-<p><strong>Indexing pipeline (every 5 minutes):</strong></p>
-<ol>
-<li><strong>Amazon EventBridge</strong> triggers the <strong>RDS-to-SQS Lambda</strong>.</li>
-<li>In <strong>Amazon RDS (PostgreSQL)</strong>, domain builders (<code>json_vtf_rec()</code>, <code>json_etf_rec()</code>, <code>json_etfi_rec()</code>, <code>json_gi_rec()</code>, <code>json_vtfi_rec()</code>, and legacy <code>json_legacy_vehicle_rec()</code> / <code>json_legacy_equipment_rec()</code> / <code>json_legacy_investigation_rec()</code>) produce <strong>denormalized document arrays</strong>. <code>pushIndexToOpenSearchTable()</code> calls <code>pushJsonData(json, index)</code> to write them to the <strong><code>sparks.open_search_json</code></strong> outbox table.</li>
-<li>The <strong>RDS-to-SQS Lambda</strong> selects unread rows (<code>osj_read_yn = false</code>, <code>LIMIT 50</code>), sends them to <strong>Amazon SQS <code>SearchQueue.fifo</code></strong> in batches of 10 (message carries <strong>IDs only</strong> — <code>osj_id</code> + index name, not the payload), and marks rows <code>osj_read_yn = true</code>.</li>
-<li>The <strong>SQS-to-OpenSearch Lambda</strong> re-fetches the payload by <code>osj_id</code>, ensures the index exists (never deletes), chunks at 1000 docs, stamps a stable <code>_id</code> via <code>_stableId()</code> (legacy → <code>legacy_equipment:&lt;id&gt;</code> etc.; non-legacy → <code>uniqueId ?? id</code>), bulk-indexes to <strong>Amazon OpenSearch (sparks-stage)</strong>, and marks <code>osj_processed_yn = true</code>.</li>
-</ol>
-<p><strong>User search path:</strong> SPARKS UI (pills/filters/keyword) → Search API → OpenSearch → results.</p>
-<p><strong>Two facts from the real data that shape the whole proposal:</strong></p>
+<h3>What the current search does well</h3>
 <ul>
-<li>The outbox documents are <strong>already AI-ready</strong> — flat business documents with rich free text (<code>failure_desc</code>, <code>prob_summary</code>) plus structured facets (<code>fmvss_code</code>, <code>brand</code>, <code>test_results</code>, dates).</li>
-<li>Every document carries a <strong><code>uniqueId</code></strong> (e.g. <code>legacy_equipment:12251</code>) that the consumer turns into the OpenSearch <code>_id</code>. This is a ready-made <strong>citation key</strong> that lets AI answers link 1:1 to real records.</li>
+<li>Exact identifiers and structured fields</li>
+<li>Keyword search</li>
+<li>Pills, filters, and facets</li>
+<li>Fast retrieval from a pre-built search index</li>
+<li>A proven asynchronous indexing pipeline decoupled from direct UI queries to PostgreSQL</li>
+</ul>
+<h3>What the AI proposal adds</h3>
+<ul>
+<li>Natural-language questions</li>
+<li>Semantic similarity and "find cases like this"</li>
+<li>Cross-record summaries and comparisons</li>
+<li>Grounded answers with source record links/citations</li>
+<li>Conversational follow-up questions</li>
+<li>For the agentic option, multi-step orchestration across approved tools</li>
 </ul>
 <hr/>
-<h2>3. The opportunity &amp; guiding principles</h2>
-<p><strong>What's missing today:</strong> natural-language questions, semantic similarity, summarization, cross-record reasoning, follow-ups, grounded answers with sources.</p>
-<p><strong>Guiding principles for the design:</strong></p>
-<ol>
-<li><strong>Don't disrupt production search.</strong> The existing OpenSearch pipeline is untouched.</li>
-<li><strong>One experience, not two searches.</strong> Add a chat box to the same UI; route exact vs. semantic behind the scenes.</li>
-<li><strong>Reuse what exists.</strong> Read the same outbox documents; reuse <code>uniqueId</code> as the citation key.</li>
-<li><strong>Keep it simple &amp; cost-safe.</strong> Extend the existing simple search; cap scope and spend; nothing applies until FED approval.</li>
-<li><strong>Governable &amp; grounded.</strong> Read-only data access, least-privilege, Bedrock guardrails, every answer cites sources.</li>
-<li><strong>Evolvable.</strong> Build RAG first; make Agentic an additive step, not a rebuild.</li>
-</ol>
+<h2>3. Design Principles</h2>
+<table>
+<tr><th>Principle</th><th>Application to SPARKS</th></tr>
+<tr><td>Do not disrupt current search</td><td>No changes are required to the current JSON builders, <code>open_search_json</code> flags, RDS-to-SQS Lambda, <code>SearchQueue.fifo</code>, SQS-to-OpenSearch Lambda, or current OpenSearch indexes for the proposal.</td></tr>
+<tr><td>One SPARKS experience</td><td>The UI can expose current structured search and Ask SPARKS in the same search area/page. They are complementary capabilities, not competing products.</td></tr>
+<tr><td>Read-only AI data access</td><td>The AI ingestion/data-preparation path reads approved data only. It does not write back to operational SPARKS data.</td></tr>
+<tr><td>Curate before embedding</td><td>Do not blindly vectorize every PostgreSQL table. Build business-domain documents with useful context and preserve source keys for traceability.</td></tr>
+<tr><td>Reuse where useful; enrich where needed</td><td>Current OpenSearch JSON is a strong starting point. Where it is incomplete for AI use cases, enrich the copy or create AI-specific JSON/domain documents.</td></tr>
+<tr><td>Ground every answer</td><td>AI responses should point back to source records or approved documents and clearly distinguish retrieved facts from generated synthesis.</td></tr>
+<tr><td>Cost only after approval</td><td>This Jira is research/design. No managed AI/vector resources should be created until FED approval and a cost ceiling are agreed.</td></tr>
+</table>
 <hr/>
 <h2>4. Option 1 — Generative AI / RAG Search</h2>
-<blockquote><strong>Diagram:</strong> <code>diagrams/option1-rag.drawio</code></blockquote>
-<p><strong>Flow:</strong> User asks a question in the <strong>Ask SPARKS</strong> chat box → <strong>API Gateway</strong> → <strong>Orchestrator Lambda</strong> → intent router (exact → existing OpenSearch; semantic → RAG) → <strong>Amazon Bedrock Knowledge Base</strong> embeds the query and retrieves from the <strong>vector index</strong> → <strong>Claude on Bedrock</strong> generates a grounded answer with <strong>citations (reusing <code>uniqueId</code>)</strong> → answer card in the UI.</p>
-<p><strong>AI data preparation (new, read-only):</strong> a scheduled <strong>Lambda/Glue</strong> job reads <code>osj_json_data</code> from the outbox read-only, optionally <strong>enriches</strong> it (populate <code>failure_type</code> / <code>prob_summary</code> / <code>sme_recc</code>, add related comments, status history, reference values), and writes <strong>curated search content to Amazon S3</strong>, partitioned by domain, one object per <code>uniqueId</code>. Bedrock Knowledge Base ingests S3 → chunks + embeds → vector index.</p>
-<p><strong>Why this is the strong near-term choice:</strong></p>
+<p>Option 1 adds a new AI retrieval path without modifying the existing OpenSearch indexing path. The goal is to let users ask questions in natural language and receive grounded answers, summaries, similar cases, citations, and follow-up questions.</p>
+<h3>How it works</h3>
+<ol>
+<li>Use an approved read-only source from SPARKS. Start by reusing existing domain JSON where it contains the required data.</li>
+<li>Normalize and curate the content for AI retrieval. Enrich the search content when current search JSON omits fields or relationships needed for the target questions.</li>
+<li>Store/index the curated content in an approved AI retrieval layer. A Bedrock Knowledge Base or equivalent managed retrieval pattern can perform chunking/embedding and retrieve relevant context.</li>
+<li>Claude generates an answer <strong>only from retrieved SPARKS context</strong> and returns source identifiers/links with the answer.</li>
+<li>Existing pills/filters/keyword search remains available unchanged. Ask SPARKS is an additional AI-assisted interaction in the same application experience.</li>
+</ol>
+<h3>Data strategy — avoid locking RAG to today's search coverage</h3>
+<table>
+<tr><th>Data approach</th><th>When to use</th><th>Trade-off</th></tr>
+<tr><td>Reuse current domain JSON</td><td>Fastest way to evaluate AI over data already prepared for search.</td><td>Coverage is limited to what current JSON builders already include.</td></tr>
+<tr><td>Enrich the current JSON copy</td><td>Recommended when most current documents are useful but specific fields/relationships are missing.</td><td>Adds a controlled enrichment step, but does not modify operational tables.</td></tr>
+<tr><td>Add AI-specific domain JSON</td><td>Use when AI questions require broader context than current search was designed to contain.</td><td>More design/data-engineering effort, but gives the cleanest long-term search content.</td></tr>
+</table>
+<h3>User value</h3>
 <ul>
-<li>Reuses existing documents and citation keys; <strong>no change to the indexing pipeline</strong>.</li>
-<li>Managed, governable retrieval; grounded answers with sources.</li>
-<li>"Enrich the search content" is low-cost because it only augments a <strong>copy</strong> — operational tables are never touched.</li>
+<li>"Show investigations similar to this failure."</li>
+<li>"Summarize common failure patterns for FMVSS 111."</li>
+<li>"Find vehicle tests involving rear-camera response delays and explain the common findings."</li>
+<li>"What records support this answer?" — return source IDs/links instead of an ungrounded narrative.</li>
 </ul>
-<p><strong>Answers "why two searches?":</strong> one chat box; the AI reads an approved copy of the same data; exact/filter still uses the current OpenSearch.</p>
+<h3>Strengths and limitations</h3>
+<table>
+<tr><th>Strengths</th><th>Limitations / considerations</th></tr>
+<tr><td>Lower complexity than an agent; fixed retrieval flow is easier to test and govern.</td><td>The model can only answer from content made available to the RAG search content.</td></tr>
+<tr><td>Does not alter current OpenSearch ingestion or search behavior.</td><td>Search-content quality, chunking, metadata, and freshness directly affect retrieval quality.</td></tr>
+<tr><td>Can expand beyond current search by enriching the AI search content.</td><td>If a question requires live tool calls or several dependent steps, RAG alone may be insufficient.</td></tr>
+<tr><td>Good fit for summaries, semantic similarity, Q&amp;A and follow-ups.</td><td>A citation/linking strategy must be defined for each domain document.</td></tr>
+</table>
 <hr/>
 <h2>5. Option 2 — Agentic Hybrid Search</h2>
-<blockquote><strong>Diagram:</strong> <code>diagrams/option2-agentic.drawio</code></blockquote>
-<p>Everything in Option 1, <strong>plus an agent</strong> that decides *how* to answer. The <strong>same chat box</strong> now sits in front of an <strong>Amazon Bedrock Agent (Claude)</strong> that plans multi-step queries and calls an <strong>approved tool set</strong>:</p>
-<ul>
-<li><code>openSearchSearch(query, filters)</code> → the <strong>existing</strong> OpenSearch index (exact/filter)</li>
-<li><code>semanticSearch(query, filters, top_k)</code> → the Option 1 vector index</li>
-<li><code>getInvestigation()</code> / <code>getVehicle()</code> / <code>getEquipment()</code> → <strong>read-only</strong> record lookups by <code>uniqueId</code></li>
-<li>(optional) approved reference docs / procedures / APIs — <strong>no raw SQL tool</strong></li>
-</ul>
-<p>The agent combines results (deduping by <code>uniqueId</code>), applies <strong>Bedrock Guardrails</strong>, and returns a grounded, multi-source answer.</p>
-<p><strong>Best for:</strong> "Find Ford investigations since 2022 involving camera/visibility failures, compare them, and tell me which resulted in recalls" — questions that need several steps and sources.</p>
-<p><strong>Key point:</strong> the existing OpenSearch is reused <strong>as one of the agent's tools</strong> — Option 2 is an evolution of Option 1, not a different system.</p>
-<hr/>
-<h2>6. Options compared (and what we deferred)</h2>
+<p>Option 2 adds an orchestration layer that can decide how to answer a question using a controlled set of SPARKS tools. It is appropriate when a single question may require several retrieval steps, exact filters, semantic similarity, record lookups, or multiple approved sources.</p>
+<h3>Approved tool model</h3>
 <table>
-<tr><th>Dimension</th><th>Option 1 — RAG</th><th>Option 2 — Agentic</th></tr>
-<tr><td>User interface</td><td>"Ask SPARKS" chat box</td><td>Same chat box</td></tr>
-<tr><td>Core behavior</td><td>Retrieve → generate</td><td>Plan → call tools → generate</td></tr>
-<tr><td>Reuses existing OpenSearch</td><td>As the exact/filter path</td><td>As an agent <strong>tool</strong></td></tr>
-<tr><td>Complexity / risk</td><td>Lower</td><td>Higher (multi-step orchestration)</td></tr>
-<tr><td>Governance</td><td>Straightforward (fixed retrieval)</td><td>Needs tool allow-listing + guardrails</td></tr>
-<tr><td>Best at</td><td>Q&amp;A, summaries, similar cases</td><td>Multi-step, cross-record reasoning</td></tr>
-<tr><td>Time-to-value</td><td>Near-term</td><td>Evolution of Option 1</td></tr>
+<tr><th>Tool</th><th>Purpose</th></tr>
+<tr><td>OpenSearch search tool</td><td>Use the current OpenSearch index for exact identifiers, keyword search, filters, dates, facets, and other structured retrieval.</td></tr>
+<tr><td>Semantic / vector search tool</td><td>Retrieve conceptually similar SPARKS records from the AI search content.</td></tr>
+<tr><td>Record detail tools</td><td>Read-only APIs/functions for investigation, vehicle, equipment, test or related record details by stable source key.</td></tr>
+<tr><td>Approved reference/document retrieval</td><td>Optional future access to policies, procedures, reference documents, or other governed sources.</td></tr>
 </table>
-<p><strong>Deliberately deferred</strong> (noted so FED sees we considered them):</p>
-<table>
-<tr><th>Pattern</th><th>Why deferred</th></tr>
-<tr><td>Text-to-SQL agent</td><td>Injection / governance risk on production PostgreSQL</td></tr>
-<tr><td>Fine-tuned domain model</td><td>Cost, data handling, retraining burden</td></tr>
-<tr><td>GraphRAG / knowledge graph</td><td>High build cost; revisit for cross-failure pattern mining</td></tr>
-</table>
-<hr/>
-<h2>7. High-Level Design (HLD)</h2>
-<p>The full HLD is maintained in <strong><code>HLD.md</code></strong>. Summary:</p>
-<ul>
-<li><strong>Purpose:</strong> add NL/semantic "Ask SPARKS" without replacing structured search.</li>
-<li><strong>Baseline:</strong> unchanged EventBridge → RDS-to-SQS → FIFO → SQS-to-OpenSearch → OpenSearch pipeline; outbox documents carry <code>uniqueId</code>.</li>
-<li><strong>Option 1 target:</strong> <code>PostgreSQL (unchanged) → [new, read-only] AI extractor → (enrich) → S3 curated search content → Bedrock KB → vector index → Claude → Ask SPARKS</code>, with exact/filter still served by existing OpenSearch.</li>
-<li><strong>Option 2 target:</strong> add a Bedrock Agent with approved tools (existing OpenSearch, vector search, read-only lookups); no unrestricted SQL.</li>
-<li><strong>Data domains:</strong> the 5 core + 3 legacy indexes; search content starts as 1:1 reuse and expands per domain.</li>
-<li><strong>Non-functional:</strong> read-only access + least-privilege; guardrails; citations; search-content refresh cadence; cost (embeddings/inference/vector sizing); evaluation before go-live.</li>
-</ul>
-<hr/>
-<h2>8. Low-Level Design (LLD)</h2>
-<p>The full LLD is maintained in <strong><code>LLD.md</code></strong>. Summary:</p>
-<ul>
-<li><strong>Search-content document schema:</strong> confirmed from a real <code>legacy_equipment</code> payload. Roles: <code>uniqueId</code> = citation key; <code>failure_desc</code> / <code>prob_summary</code> / <code>sme_recc</code> / <code>product_desc</code> / <code>test_results</code> = primary embedding text; <code>fmvss_code</code> / <code>compliance_prg_yr</code> / <code>brand</code> / <code>manufacturer</code> / <code>vehicle_make</code> / <code>lab_name</code> / <code>test_results</code> = filters/facets; <code>report_accept_dt</code> / <code>create_dt</code> / <code>update_dt</code> = dates.</li>
-<li><strong>AI extractor:</strong> scheduled; read-only <code>SELECT</code> from <code>sparks.open_search_json</code>; normalize string-or-array payload (mirroring the consumer); optional enrichment; write <code>s3://sparks-ai-search-content/&lt;domain&gt;/&lt;uniqueId&gt;.json</code>.</li>
-<li><strong>Chunking/embedding:</strong> chunk long <code>failure_desc</code>; keep structured fields as metadata; store <code>uniqueId</code>/domain/facets as chunk metadata for filtered retrieval.</li>
-<li><strong>Vector store options:</strong> OpenSearch vector index (recommended — same domain already run), pgvector, or S3 Vectors.</li>
-<li><strong>Retrieval/generation contract:</strong> request <code>{query, filters, top_k}</code> → response <code>{answer, citations[] (with uniqueId), followups[]}</code>; <strong>every claim cites ≥1 <code>uniqueId</code></strong>.</li>
-<li><strong>Evaluation:</strong> golden Q&amp;A set with known-correct citations; metrics (recall@k, citation correctness, groundedness, relevance); deterministic + LLM-judge + SME spot check; acceptance thresholds before go-live.</li>
-<li><strong>Option 2 tool contracts:</strong> <code>openSearchSearch</code>, <code>semanticSearch</code>, <code>getInvestigation/getVehicle/getEquipment</code> — all read-only; agent merges by <code>uniqueId</code>; <strong>no raw SQL tool</strong>.</li>
-<li><strong>Explicitly unchanged:</strong> both Lambdas, <code>SearchQueue.fifo</code>, <code>pushJsonData</code>, <code>pushIndexToOpenSearchTable</code>, all <code>json_*_rec()</code> builders, the outbox schema/flags, existing indexes, and the current pills/filters/keyword UI.</li>
-</ul>
-<hr/>
-<h2>9. Recommendation &amp; phased roadmap</h2>
-<p><strong>Recommendation:</strong> Build <strong>Option 1 (RAG)</strong> first as the governable near-term capability, architected so <strong>Option 2 (Agentic)</strong> is an additive layer that reuses the same search content and the existing OpenSearch as a tool.</p>
-<table>
-<tr><th>Phase</th><th>Deliverable</th><th>Outcome</th></tr>
-<tr><td><strong>0 — Foundations</strong></td><td>Confirm open questions (§10); provision S3 search-content bucket, Bedrock KB, vector index; IAM least-privilege; read-only outbox access</td><td>Guardrails and plumbing in place</td></tr>
-<tr><td><strong>1 — RAG MVP (Option 1)</strong></td><td>Extractor (reuse-only, no enrichment) → S3 → KB → Claude; "Ask SPARKS" chat box wired into existing UI; citations via <code>uniqueId</code></td><td>Natural-language Q&amp;A over current data</td></tr>
-<tr><td><strong>2 — Enrich &amp; evaluate</strong></td><td>Enrich search content (<code>failure_type</code>/<code>prob_summary</code>/<code>sme_recc</code>, comments, status history); golden Q&amp;A set + acceptance thresholds</td><td>Broader coverage; measured quality</td></tr>
-<tr><td><strong>3 — Agentic (Option 2)</strong></td><td>Add Bedrock Agent + approved tools (existing OpenSearch, semantic search, read-only lookups); guardrails</td><td>Multi-step, cross-record reasoning</td></tr>
-</table>
-<hr/>
-<h2>10. Open questions for FED</h2>
+<blockquote><strong>Guardrail:</strong> Do not expose unrestricted SQL as an agent tool. The agent should interact through purpose-built, read-only contracts with explicit scopes and auditable inputs/outputs.</blockquote>
+<h3>Example multi-step question</h3>
+<p>*"Find Ford investigations since 2022 involving camera or visibility failures, compare the failures, and tell me which resulted in recalls."*</p>
 <ol>
-<li><strong>Vector store:</strong> OpenSearch vector index (recommended) vs pgvector vs S3 Vectors?</li>
-<li><strong>Retrieval:</strong> Bedrock Knowledge Base (managed) vs a custom retrieval pipeline?</li>
-<li><strong>Enrichment scope for v1:</strong> reuse-only, or enrich <code>failure_type</code> / <code>prob_summary</code> / <code>sme_recc</code> from the start?</li>
-<li><strong>FE integration contract:</strong> how does "Ask SPARKS" slot into the current search UI (same page/panel, response rendering, citation click-through)?</li>
-<li><strong>Search-content freshness:</strong> align the AI search-content refresh to the 5-minute cycle, or a slower batch?</li>
-<li><strong>Current search internals:</strong> does the UI query OpenSearch via API Gateway + Lambda (as drawn), or another path? (Confirm so the As-Is diagram is exact.)</li>
-<li><strong>EDMAS reuse:</strong> following the upcoming EDMAS meeting, are any EDMAS AI components (already running GenAI/RAG) available for SPARKS to reuse — which would reduce our build?</li>
+<li>Parse manufacturer, date range, concept, comparison requirement, and recall outcome.</li>
+<li>Use structured OpenSearch filters for manufacturer/date and semantic retrieval for camera/visibility concepts.</li>
+<li>Retrieve details for the matching records.</li>
+<li>Deduplicate/merge by stable source key.</li>
+<li>Generate a comparison and cite the records that support each finding.</li>
+</ol>
+<h3>Strengths and limitations</h3>
+<table>
+<tr><th>Strengths</th><th>Limitations / considerations</th></tr>
+<tr><td>Best fit for complex, multi-step questions.</td><td>Higher implementation and testing complexity than fixed RAG.</td></tr>
+<tr><td>Reuses the existing OpenSearch as a tool instead of replacing it.</td><td>Requires strict tool allow-listing, IAM boundaries, logging, timeout/retry behavior, and guardrails.</td></tr>
+<tr><td>Can combine exact search, semantic retrieval, and record lookups.</td><td>Agent plans can be non-deterministic; evaluation must cover tool choice and final-answer grounding.</td></tr>
+<tr><td>Extensible to future approved data sources.</td><td>More model calls/tool calls can increase latency and cost.</td></tr>
+</table>
+<hr/>
+<h2>6. Option Comparison</h2>
+<table>
+<tr><th>Dimension</th><th>Option 1 — RAG</th><th>Option 2 — Agentic Hybrid</th></tr>
+<tr><td>Primary behavior</td><td>Retrieve → generate</td><td>Plan → call approved tools → combine → generate</td></tr>
+<tr><td>Best for</td><td>Q&amp;A, summaries, semantic similarity, follow-ups</td><td>Complex multi-step and cross-source questions</td></tr>
+<tr><td>Current OpenSearch</td><td>Unchanged; current structured search remains available</td><td>Unchanged and exposed as one approved agent tool</td></tr>
+<tr><td>Data source</td><td>Curated/enriched AI search content</td><td>Same AI search content plus current OpenSearch and approved lookups</td></tr>
+<tr><td>Operational DB access</td><td>Read-only ingestion/data prep; no direct LLM DB access</td><td>No unrestricted DB access; purpose-built read-only tools only</td></tr>
+<tr><td>Complexity</td><td>Moderate</td><td>Higher</td></tr>
+<tr><td>Governance</td><td>Fixed retrieval path is easier to control</td><td>Requires tool permissions, orchestration controls, traceability</td></tr>
+<tr><td>Cost drivers</td><td>Embeddings, vector storage/retrieval, LLM inference</td><td>All RAG costs plus additional LLM/tool calls</td></tr>
+<tr><td>Recommended role</td><td>Near-term AI search option</td><td>Advanced evolution when multi-step needs justify it</td></tr>
+</table>
+<hr/>
+<h2>7. Recommended Direction</h2>
+<p>Present both architectures to FED as alternatives, not as an implementation commitment. The recommended sequence is to validate the business value and retrieval quality of RAG first, while ensuring its data model and APIs can be reused by an agentic layer later.</p>
+<table>
+<tr><th>Stage</th><th>Decision / output</th></tr>
+<tr><td>Research / proposal (current Jira)</td><td>Approve target user use cases, data scope, architecture direction, security boundaries, and a cost ceiling. No AWS AI resources are created.</td></tr>
+<tr><td>If Option 1 is approved</td><td>Build a controlled Dev evaluation over a representative approved search content set; measure retrieval quality, citation correctness, groundedness, latency, and cost.</td></tr>
+<tr><td>Enrichment decision</td><td>If current domain JSON does not support target questions, enrich the AI copy or add AI-specific domain JSON. Do not redesign operational PostgreSQL solely for AI.</td></tr>
+<tr><td>If agentic capability is justified</td><td>Reuse the RAG search content and expose current OpenSearch/read-only details as explicit tools. Add orchestration only for use cases that need multi-step behavior.</td></tr>
+</table>
+<h3>Why this is the best use of existing resources</h3>
+<ul>
+<li>Preserves the proven current OpenSearch pipeline and UI behavior.</li>
+<li>Reuses existing denormalized domain knowledge instead of starting from raw tables.</li>
+<li>Allows AI coverage to grow independently through enrichment without destabilizing current search.</li>
+<li>Lets Option 2 reuse both the RAG search content and current OpenSearch, avoiding a second replacement search platform.</li>
+<li>Keeps expensive/complex agentic orchestration optional until a real user need requires it.</li>
+</ul>
+<hr/>
+<h2>8. Security, Governance and Cost Posture</h2>
+<table>
+<tr><th>Area</th><th>Proposal requirement</th></tr>
+<tr><td>Data access</td><td>Read-only, least-privilege access to approved SPARKS data. No AI write path to operational records.</td></tr>
+<tr><td>Network</td><td>Use approved DOT/AWS networking patterns for any future Dev implementation. Final VPC endpoint/private access requirements are architecture-review decisions.</td></tr>
+<tr><td>Identity / authorization</td><td>Preserve SPARKS user authorization. AI retrieval must not expose records the requesting user is not allowed to see.</td></tr>
+<tr><td>Grounding</td><td>Answers should include source identifiers/links. If sufficient evidence is not retrieved, the assistant should say so rather than fabricate.</td></tr>
+<tr><td>Prompt / output controls</td><td>Apply content controls/guardrails appropriate to SPARKS data and log policy decisions without logging sensitive content unnecessarily.</td></tr>
+<tr><td>Auditability</td><td>Record request ID, retrieved source keys, tool calls (for agentic), model response metadata, errors, and latency.</td></tr>
+<tr><td>Cost</td><td>Research/design remains $0 AWS spend. Any implementation requires approval, usage limits, monitoring, and a defined stop/rollback condition.</td></tr>
+</table>
+<hr/>
+<h2>9. Decisions / Open Questions for FED</h2>
+<ol>
+<li>Which user questions are highest priority: semantic "find similar," summarization, cross-record comparison, or multi-step investigation?</li>
+<li>For the first approved AI search content set, is reuse of current domain JSON sufficient, or should enrichment be included from the start?</li>
+<li>What additional fields/relationships are missing from current JSON for the target AI use cases?</li>
+<li>What is the approved vector-store / retrieval technology for the DOT environment? Keep this as a selection decision rather than assuming a specific product before sizing.</li>
+<li>What freshness is required for AI search content — near the current indexing cadence, hourly, or daily?</li>
+<li>How should Ask SPARKS appear in the UI: same search page, side panel, or explicit AI tab while retaining the existing pills/filters?</li>
+<li>What source-key/linking contract will map AI citations back to the correct SPARKS record?</li>
+<li>What Dev data set is approved for evaluation, and what data classifications/PII restrictions apply?</li>
+<li>What evaluation thresholds must be met before any pilot can be considered successful?</li>
+<li>Does FED want Option 1 only for the first evaluation, or should the design reserve agent tool contracts from the beginning without enabling agentic behavior?</li>
 </ol>
 <hr/>
-<h2>11. Appendix — diagrams &amp; source grounding</h2>
-<p><strong>draw.io diagrams</strong> (open in <a href="https://app.diagrams.net">app.diagrams.net</a> → File → Open; every box is labeled with its AWS service + role):</p>
+<h2>10. Explicitly Deferred / Not Recommended for Initial Proposal</h2>
+<table>
+<tr><th>Pattern</th><th>Reason to defer</th></tr>
+<tr><td>Direct LLM / agent access to production PostgreSQL</td><td>Unnecessary coupling and governance risk for a search use case. Prefer curated retrieval and explicit read-only tools.</td></tr>
+<tr><td>Blindly embedding every table/row</td><td>Relational rows lack business context and create noisy retrieval. Build domain documents instead.</td></tr>
+<tr><td>Text-to-SQL against operational SPARKS</td><td>Requires substantially more security, SQL validation, authorization, workload isolation, and result-governance controls.</td></tr>
+<tr><td>Fine-tuning a model for search</td><td>RAG/tool retrieval provides current SPARKS facts without the cost and lifecycle burden of training a domain model.</td></tr>
+<tr><td>Replacing current OpenSearch pipeline</td><td>The existing search already solves exact/filtered retrieval. AI should extend it, not rebuild it without a proven business reason.</td></tr>
+</table>
+<hr/>
+<h2>Appendix A — Source Grounding and Corrections</h2>
+<p>This refined proposal is based on the initial draft plus the actual SPARKS search logic reviewed during the analysis: the PostgreSQL <code>pushJsonData()</code> and <code>pushIndexToOpenSearchTable()</code> functions, the RDS-to-SQS Lambda, the SQS-to-OpenSearch Lambda, and the current OpenSearch/SQS/EventBridge configuration. Where the initial draft stated implementation assets or production-readiness that were not necessary to establish the proposal, those statements were removed or converted into future validation items.</p>
+<h3>Key technical corrections applied</h3>
 <ul>
-<li><code>diagrams/sparks-er-current-asis.drawio</code> — <strong>ER diagram, As-Is</strong> (existing data model, for reference)</li>
-<li><code>diagrams/sparks-er-option1-2-proposed.drawio</code> — <strong>ER diagram, Proposed (Option 1 &amp; 2)</strong> — new AI data entities keyed on <code>uniqueId</code> (<strong>the one for proposal review</strong>)</li>
-<li><code>diagrams/current-sparks-search.drawio</code> — Current state (As-Is)</li>
-<li><code>diagrams/option1-rag.drawio</code> — Option 1 (Generative AI / RAG)</li>
-<li><code>diagrams/option2-agentic.drawio</code> — Option 2 (Agentic Hybrid)</li>
-</ul>
-<p><strong>Cost / effort / resources:</strong> <code>COST_EFFORT_RESOURCES.md</code> — the "sell-wise" breakdown for NARB (resources, LLM, vectorization/pgvector decision, token &amp; cost model, effort/complexity, phasing, risks). All figures are estimates; <strong>$0 is spent under this story</strong>.</p>
-<p><strong>Mermaid diagrams</strong> (render on GitHub; same content, lighter weight):</p>
-<ul>
-<li><code>diagrams/01-current-state.md</code>, <code>diagrams/02-future-option1-rag.md</code>, <code>diagrams/03-future-option2-agentic.md</code></li>
-</ul>
-<p><strong>Design docs:</strong> <code>HLD.md</code>, <code>LLD.md</code>, <strong><code>PRODUCTION_DESIGN.md</code></strong> (E2E prod-ready: locked decisions, API spec, security/IAM, observability/SLOs, CI/CD, rollback, go-live runbook)</p>
-<p><strong>Infrastructure as Code:</strong> <code>infra/terraform/</code> — modular, well-commented Terraform (Dev env + 6 modules: <code>ai_search_content</code>, <code>vector_index</code>, <code>bedrock_rag</code>, <code>ask_api</code>, <code>agent</code>, <code>observability</code>). <code>enable_agent=false</code> → Option 1 only; <code>true</code> → adds Option 2. <strong>No <code>apply</code> until FED approval</strong> (<code>validate</code>/<code>plan</code> are free).</p>
-<p><strong>Source grounding:</strong> this proposal is based on the actual SPARKS code — the RDS-to-SQS Lambda, the SQS-to-OpenSearch Lambda, the <code>sparks.pushjsondata</code> and <code>sparks.pushindextoopensearchtable</code> PL/pgSQL functions, and a real <code>osj_json_data</code> (<code>legacy_equipment</code>) payload. Where a detail was not evident from the code (e.g. the exact FE→OpenSearch query path), it is flagged as an open question (§10).</p></body></html>
+<li>Existing search documents are denormalized business JSON but can contain nested content; they should not be characterized as universally "flat."</li>
+<li>The SQS message carries identifiers/index metadata, not the full JSON payload; the downstream Lambda re-fetches <code>osj_json_data</code> by <code>osj_id</code>.</li>
+<li>A stable OpenSearch <code>_id</code> is computed by the consumer. The AI design should preserve a stable source key, but should not assume every upstream document already contains the same <code>uniqueId</code> field.</li>
+<li>RAG can be enhanced beyond the current search data by enriching the copied documents or adding AI-specific domain JSON. It is not permanently limited to today's OpenSearch schema.</li>
+<li>Tool selection and multi-step orchestration are reserved for the Agentic option; fixed RAG remains the simpler, deterministic retrieval architecture.</li>
+</ul></body></html>
