@@ -1,0 +1,147 @@
+<mxfile host="app.diagrams.net" agent="SPARKS-AI-Search" version="24.0.0">
+  <diagram id="er-proposed" name="Proposed ER - Option 1 &amp; 2">
+    <mxGraphModel dx="1400" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1700" pageHeight="1150" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <mxCell id="title" value="Proposed ER / Data Model — AI Search (Option 1 &amp; Option 2)" style="text;html=1;fontSize=20;fontStyle=1;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="300" y="20" width="1100" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="subtitle" value="GREY = existing SPARKS entities (unchanged). GREEN = NEW entities introduced by the AI solution. Every new entity ties back to the existing documents through the uniqueId key. Option 2 adds the AgentToolCall / session entities only (shown dashed)." style="text;html=1;fontSize=11;fontStyle=2;align=center;verticalAlign=middle;fontColor=#555555;" vertex="1" parent="1">
+          <mxGeometry x="200" y="60" width="1300" height="36" as="geometry" />
+        </mxCell>
+        <mxCell id="legend" value="Legend:  grey = existing (unchanged)  ·  green = NEW (Option 1 — RAG)  ·  dashed green = NEW (Option 2 — Agentic only)  ·  key link = uniqueId" style="text;html=1;fontSize=11;align=center;verticalAlign=middle;fontColor=#777777;" vertex="1" parent="1">
+          <mxGeometry x="200" y="96" width="1300" height="20" as="geometry" />
+        </mxCell>
+
+        <!-- ===================== EXISTING (grey) ===================== -->
+        <mxCell id="grpExisting" value="EXISTING SPARKS (unchanged — source of truth)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f0f0f0;strokeColor=#999999;dashed=0;verticalAlign=top;fontStyle=1;fontSize=12;fontColor=#555555;" vertex="1" parent="1">
+          <mxGeometry x="40" y="140" width="420" height="470" as="geometry" />
+        </mxCell>
+
+        <mxCell id="outbox" value="sparks.open_search_json  (OUTBOX)" style="shape=table;html=1;startSize=28;container=1;collapsible=0;fillColor=#eeeeee;strokeColor=#999999;fontStyle=1;fontColor=#555555;" vertex="1" parent="1">
+          <mxGeometry x="70" y="180" width="360" height="120" as="geometry" />
+          <mxCell id="ob1" value="PK  osj_id" style="shape=tableRow;html=1;startSize=0;fillColor=none;fontColor=#555555;" vertex="1" parent="outbox"><mxGeometry y="28" width="360" height="22" as="geometry" /></mxCell>
+          <mxCell id="ob2" value="osj_table_index_name  ·  osj_json_data" style="shape=tableRow;html=1;startSize=0;fillColor=none;fontColor=#555555;" vertex="1" parent="outbox"><mxGeometry y="50" width="360" height="22" as="geometry" /></mxCell>
+          <mxCell id="ob3" value="osj_read_yn  ·  osj_processed_yn" style="shape=tableRow;html=1;startSize=0;fillColor=none;fontColor=#555555;" vertex="1" parent="outbox"><mxGeometry y="72" width="360" height="22" as="geometry" /></mxCell>
+          <mxCell id="ob4" value="osj_create_dt  ·  osj_update_dt" style="shape=tableRow;html=1;startSize=0;fillColor=none;fontColor=#555555;" vertex="1" parent="outbox"><mxGeometry y="94" width="360" height="22" as="geometry" /></mxCell>
+        </mxCell>
+
+        <mxCell id="doc" value="SPARKS Document  (inside osj_json_data[])" style="shape=table;html=1;startSize=28;container=1;collapsible=0;fillColor=#eeeeee;strokeColor=#999999;fontStyle=1;fontColor=#555555;" vertex="1" parent="1">
+          <mxGeometry x="70" y="330" width="360" height="150" as="geometry" />
+          <mxCell id="d1" value="PK  uniqueId  (e.g. legacy_equipment:12251)" style="shape=tableRow;html=1;startSize=0;fillColor=#e3e3e3;fontStyle=1;fontColor=#333333;" vertex="1" parent="doc"><mxGeometry y="28" width="360" height="24" as="geometry" /></mxCell>
+          <mxCell id="d2" value="searchModule  ·  structured facets" style="shape=tableRow;html=1;startSize=0;fillColor=none;fontColor=#555555;" vertex="1" parent="doc"><mxGeometry y="52" width="360" height="24" as="geometry" /></mxCell>
+          <mxCell id="d3" value="failure_desc · prob_summary · sme_recc (free text)" style="shape=tableRow;html=1;startSize=0;fillColor=none;fontColor=#555555;" vertex="1" parent="doc"><mxGeometry y="76" width="360" height="24" as="geometry" /></mxCell>
+          <mxCell id="d4" value="dates: report_accept_dt · create_dt · update_dt" style="shape=tableRow;html=1;startSize=0;fillColor=none;fontColor=#555555;" vertex="1" parent="doc"><mxGeometry y="100" width="360" height="24" as="geometry" /></mxCell>
+        </mxCell>
+
+        <mxCell id="osidx" value="OpenSearch index doc  (_id = uniqueId)" style="shape=table;html=1;startSize=28;container=1;collapsible=0;fillColor=#eeeeee;strokeColor=#999999;fontStyle=1;fontColor=#555555;" vertex="1" parent="1">
+          <mxGeometry x="70" y="510" width="360" height="80" as="geometry" />
+          <mxCell id="os1" value="PK  _id  (← uniqueId via _stableId)" style="shape=tableRow;html=1;startSize=0;fillColor=#e3e3e3;fontStyle=1;fontColor=#333333;" vertex="1" parent="osidx"><mxGeometry y="28" width="360" height="24" as="geometry" /></mxCell>
+          <mxCell id="os2" value="keyword/filter fields (today's search)" style="shape=tableRow;html=1;startSize=0;fillColor=none;fontColor=#555555;" vertex="1" parent="osidx"><mxGeometry y="52" width="360" height="24" as="geometry" /></mxCell>
+        </mxCell>
+
+        <!-- ===================== NEW: Option 1 (green) ===================== -->
+        <mxCell id="grpNew2" value="NEW — Option 1 (RAG) data entities" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#eafaf1;strokeColor=#82b366;verticalAlign=top;fontStyle=1;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="520" y="140" width="640" height="640" as="geometry" />
+        </mxCell>
+
+        <mxCell id="corpus" value="CuratedSearchContent  (Amazon S3)  — NEW" style="shape=table;html=1;startSize=28;container=1;collapsible=0;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="560" y="185" width="400" height="160" as="geometry" />
+          <mxCell id="c1" value="PK  content_object_key  (s3://.../&lt;domain&gt;/&lt;uniqueId&gt;.json)" style="shape=tableRow;html=1;startSize=0;fillColor=#eafaf1;fontStyle=1;" vertex="1" parent="corpus"><mxGeometry y="28" width="400" height="24" as="geometry" /></mxCell>
+          <mxCell id="c2" value="FK  uniqueId  → SPARKS Document" style="shape=tableRow;html=1;startSize=0;fillColor=none;fontStyle=1;" vertex="1" parent="corpus"><mxGeometry y="52" width="400" height="24" as="geometry" /></mxCell>
+          <mxCell id="c3" value="domain  ·  source_osj_id (FK → outbox)" style="shape=tableRow;html=1;startSize=0;fillColor=none;" vertex="1" parent="corpus"><mxGeometry y="76" width="400" height="24" as="geometry" /></mxCell>
+          <mxCell id="c4" value="curated_text (clean body for embedding)" style="shape=tableRow;html=1;startSize=0;fillColor=none;" vertex="1" parent="corpus"><mxGeometry y="100" width="400" height="24" as="geometry" /></mxCell>
+          <mxCell id="c5" value="enrichment: failure_type? prob_summary? sme_recc?" style="shape=tableRow;html=1;startSize=0;fillColor=none;" vertex="1" parent="corpus"><mxGeometry y="124" width="400" height="24" as="geometry" /></mxCell>
+        </mxCell>
+
+        <mxCell id="chunk" value="DocChunk  — NEW" style="shape=table;html=1;startSize=28;container=1;collapsible=0;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="560" y="375" width="400" height="140" as="geometry" />
+          <mxCell id="ch1" value="PK  chunk_id" style="shape=tableRow;html=1;startSize=0;fillColor=#eafaf1;fontStyle=1;" vertex="1" parent="chunk"><mxGeometry y="28" width="400" height="24" as="geometry" /></mxCell>
+          <mxCell id="ch2" value="FK  content_object_key → CuratedSearchContent" style="shape=tableRow;html=1;startSize=0;fillColor=none;fontStyle=1;" vertex="1" parent="chunk"><mxGeometry y="52" width="400" height="24" as="geometry" /></mxCell>
+          <mxCell id="ch3" value="chunk_seq  ·  chunk_text" style="shape=tableRow;html=1;startSize=0;fillColor=none;" vertex="1" parent="chunk"><mxGeometry y="76" width="400" height="24" as="geometry" /></mxCell>
+          <mxCell id="ch4" value="metadata: uniqueId · domain · facets (for filtered retrieval)" style="shape=tableRow;html=1;startSize=0;fillColor=none;" vertex="1" parent="chunk"><mxGeometry y="100" width="400" height="24" as="geometry" /></mxCell>
+        </mxCell>
+
+        <mxCell id="embed" value="Embedding / Vector record  (OpenSearch vector index)  — NEW" style="shape=table;html=1;startSize=28;container=1;collapsible=0;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="560" y="545" width="400" height="160" as="geometry" />
+          <mxCell id="e1" value="PK  vector_id" style="shape=tableRow;html=1;startSize=0;fillColor=#eafaf1;fontStyle=1;" vertex="1" parent="embed"><mxGeometry y="28" width="400" height="24" as="geometry" /></mxCell>
+          <mxCell id="e2" value="FK  chunk_id → DocChunk" style="shape=tableRow;html=1;startSize=0;fillColor=none;fontStyle=1;" vertex="1" parent="embed"><mxGeometry y="52" width="400" height="24" as="geometry" /></mxCell>
+          <mxCell id="e3" value="embedding  vector[d]  (Titan/Cohere via Bedrock)" style="shape=tableRow;html=1;startSize=0;fillColor=none;" vertex="1" parent="embed"><mxGeometry y="76" width="400" height="24" as="geometry" /></mxCell>
+          <mxCell id="e4" value="uniqueId (carried as metadata → citation)" style="shape=tableRow;html=1;startSize=0;fillColor=none;" vertex="1" parent="embed"><mxGeometry y="100" width="400" height="24" as="geometry" /></mxCell>
+          <mxCell id="e5" value="model_id · embedded_at" style="shape=tableRow;html=1;startSize=0;fillColor=none;" vertex="1" parent="embed"><mxGeometry y="124" width="400" height="24" as="geometry" /></mxCell>
+        </mxCell>
+
+        <mxCell id="answer" value="AnswerCitation  (per Ask-SPARKS response)  — NEW" style="shape=table;html=1;startSize=28;container=1;collapsible=0;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="990" y="185" width="140" height="160" as="geometry" />
+          <mxCell id="a1" value="PK answer_id" style="shape=tableRow;html=1;startSize=0;fillColor=#eafaf1;fontStyle=1;fontSize=10;" vertex="1" parent="answer"><mxGeometry y="28" width="140" height="30" as="geometry" /></mxCell>
+          <mxCell id="a2" value="query_text" style="shape=tableRow;html=1;startSize=0;fillColor=none;fontSize=10;" vertex="1" parent="answer"><mxGeometry y="58" width="140" height="26" as="geometry" /></mxCell>
+          <mxCell id="a3" value="FK uniqueId[] (cited)" style="shape=tableRow;html=1;startSize=0;fillColor=none;fontSize=10;" vertex="1" parent="answer"><mxGeometry y="84" width="140" height="30" as="geometry" /></mxCell>
+          <mxCell id="a4" value="tokens_in/out" style="shape=tableRow;html=1;startSize=0;fillColor=none;fontSize=10;" vertex="1" parent="answer"><mxGeometry y="114" width="140" height="22" as="geometry" /></mxCell>
+          <mxCell id="a5" value="created_at" style="shape=tableRow;html=1;startSize=0;fillColor=none;fontSize=10;" vertex="1" parent="answer"><mxGeometry y="136" width="140" height="22" as="geometry" /></mxCell>
+        </mxCell>
+
+        <!-- ===================== NEW: Option 2 only (dashed green) ===================== -->
+        <mxCell id="grpNew3" value="NEW — Option 2 (Agentic) only" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f3fbf0;strokeColor=#82b366;dashed=1;verticalAlign=top;fontStyle=1;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="1200" y="140" width="420" height="470" as="geometry" />
+        </mxCell>
+
+        <mxCell id="session" value="AgentSession  — NEW (Opt 2)" style="shape=table;html=1;startSize=28;container=1;collapsible=0;fillColor=#d5e8d4;strokeColor=#82b366;dashed=1;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1230" y="185" width="360" height="130" as="geometry" />
+          <mxCell id="s1" value="PK  session_id" style="shape=tableRow;html=1;startSize=0;fillColor=#eafaf1;fontStyle=1;" vertex="1" parent="session"><mxGeometry y="28" width="360" height="24" as="geometry" /></mxCell>
+          <mxCell id="s2" value="user_question  ·  started_at" style="shape=tableRow;html=1;startSize=0;fillColor=none;" vertex="1" parent="session"><mxGeometry y="52" width="360" height="24" as="geometry" /></mxCell>
+          <mxCell id="s3" value="plan_summary (agent reasoning outline)" style="shape=tableRow;html=1;startSize=0;fillColor=none;" vertex="1" parent="session"><mxGeometry y="76" width="360" height="24" as="geometry" /></mxCell>
+          <mxCell id="s4" value="total_tokens  ·  n_tool_calls" style="shape=tableRow;html=1;startSize=0;fillColor=none;" vertex="1" parent="session"><mxGeometry y="100" width="360" height="24" as="geometry" /></mxCell>
+        </mxCell>
+
+        <mxCell id="toolcall" value="AgentToolCall  — NEW (Opt 2)" style="shape=table;html=1;startSize=28;container=1;collapsible=0;fillColor=#d5e8d4;strokeColor=#82b366;dashed=1;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1230" y="345" width="360" height="235" as="geometry" />
+          <mxCell id="t1" value="PK  tool_call_id" style="shape=tableRow;html=1;startSize=0;fillColor=#eafaf1;fontStyle=1;" vertex="1" parent="toolcall"><mxGeometry y="28" width="360" height="24" as="geometry" /></mxCell>
+          <mxCell id="t2" value="FK  session_id → AgentSession" style="shape=tableRow;html=1;startSize=0;fillColor=none;fontStyle=1;" vertex="1" parent="toolcall"><mxGeometry y="52" width="360" height="24" as="geometry" /></mxCell>
+          <mxCell id="t3" value="tool_name  (openSearchSearch | semanticSearch |" style="shape=tableRow;html=1;startSize=0;fillColor=none;" vertex="1" parent="toolcall"><mxGeometry y="76" width="360" height="24" as="geometry" /></mxCell>
+          <mxCell id="t3b" value="   getInvestigation | getVehicle | getEquipment)" style="shape=tableRow;html=1;startSize=0;fillColor=none;" vertex="1" parent="toolcall"><mxGeometry y="100" width="360" height="24" as="geometry" /></mxCell>
+          <mxCell id="t4" value="input_args  (query / filters / uniqueId)" style="shape=tableRow;html=1;startSize=0;fillColor=none;" vertex="1" parent="toolcall"><mxGeometry y="124" width="360" height="24" as="geometry" /></mxCell>
+          <mxCell id="t5" value="result_uniqueIds[]  (FK → SPARKS Document)" style="shape=tableRow;html=1;startSize=0;fillColor=none;fontStyle=1;" vertex="1" parent="toolcall"><mxGeometry y="148" width="360" height="24" as="geometry" /></mxCell>
+          <mxCell id="t6" value="step_seq  ·  latency_ms  ·  tokens" style="shape=tableRow;html=1;startSize=0;fillColor=none;" vertex="1" parent="toolcall"><mxGeometry y="172" width="360" height="24" as="geometry" /></mxCell>
+          <mxCell id="t7" value="source: existing OpenSearch | vector index | RDS view" style="shape=tableRow;html=1;startSize=0;fillColor=none;fontStyle=2;" vertex="1" parent="toolcall"><mxGeometry y="196" width="360" height="24" as="geometry" /></mxCell>
+        </mxCell>
+
+        <!-- ===== eval (shared) ===== -->
+        <mxCell id="golden" value="GoldenEvalItem  — NEW (quality gate, both options)" style="shape=table;html=1;startSize=28;container=1;collapsible=0;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="560" y="640" width="400" height="120" as="geometry" />
+          <mxCell id="g1" value="PK  eval_id" style="shape=tableRow;html=1;startSize=0;fillColor=#eafaf1;fontStyle=1;" vertex="1" parent="golden"><mxGeometry y="28" width="400" height="24" as="geometry" /></mxCell>
+          <mxCell id="g2" value="question  ·  expected_uniqueId[]  (ground truth)" style="shape=tableRow;html=1;startSize=0;fillColor=none;" vertex="1" parent="golden"><mxGeometry y="52" width="400" height="24" as="geometry" /></mxCell>
+          <mxCell id="g3" value="metrics: recall@k · citation_correct · groundedness" style="shape=tableRow;html=1;startSize=0;fillColor=none;" vertex="1" parent="golden"><mxGeometry y="76" width="400" height="24" as="geometry" /></mxCell>
+        </mxCell>
+
+        <!-- ===================== relationships ===================== -->
+        <!-- existing chain -->
+        <mxCell id="r_ob_doc" value="contains" style="edgeStyle=entityRelationEdgeStyle;html=1;endArrow=ERmany;startArrow=ERone;rounded=0;strokeColor=#999999;" edge="1" parent="1" source="outbox" target="doc"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="r_doc_os" value="indexed as" style="edgeStyle=entityRelationEdgeStyle;html=1;endArrow=ERone;startArrow=ERone;rounded=0;strokeColor=#999999;" edge="1" parent="1" source="doc" target="osidx"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <!-- doc -> search content (the key reuse link) -->
+        <mxCell id="r_doc_corpus" value="1 : 1  via uniqueId  (read-only reuse)" style="edgeStyle=entityRelationEdgeStyle;html=1;endArrow=ERone;startArrow=ERone;rounded=0;strokeColor=#2E7D32;strokeWidth=2;exitX=1;exitY=0.3;entryX=0;entryY=0.3;" edge="1" parent="1" source="doc" target="corpus"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <!-- search content -> chunk -> embed -->
+        <mxCell id="r_corpus_chunk" value="1 : N  chunked into" style="edgeStyle=entityRelationEdgeStyle;html=1;endArrow=ERmany;startArrow=ERone;rounded=0;strokeColor=#82b366;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="corpus" target="chunk"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="r_chunk_embed" value="1 : 1  embedded as" style="edgeStyle=entityRelationEdgeStyle;html=1;endArrow=ERone;startArrow=ERone;rounded=0;strokeColor=#82b366;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="chunk" target="embed"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <!-- answer cites doc -->
+        <mxCell id="r_answer_doc" value="cites (N uniqueId)" style="edgeStyle=entityRelationEdgeStyle;html=1;endArrow=ERmany;startArrow=ERzeroToMany;rounded=0;strokeColor=#82b366;exitX=0;exitY=0.5;entryX=1;entryY=0.1;" edge="1" parent="1" source="answer" target="doc"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <!-- option2 session -> toolcall -> doc -->
+        <mxCell id="r_sess_tool" value="1 : N" style="edgeStyle=entityRelationEdgeStyle;html=1;endArrow=ERmany;startArrow=ERone;rounded=0;strokeColor=#82b366;dashed=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="session" target="toolcall"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="r_tool_doc" value="returns uniqueId[]" style="edgeStyle=entityRelationEdgeStyle;html=1;endArrow=ERmany;startArrow=ERzeroToMany;rounded=0;strokeColor=#82b366;dashed=1;exitX=0;exitY=0.5;entryX=1;entryY=0.6;" edge="1" parent="1" source="toolcall" target="doc"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <!-- toolcall also hits existing OpenSearch -->
+        <mxCell id="r_tool_os" value="openSearchSearch → existing index" style="edgeStyle=entityRelationEdgeStyle;html=1;endArrow=ERmany;startArrow=ERzeroToMany;rounded=0;strokeColor=#82b366;dashed=1;exitX=0;exitY=0.85;entryX=1;entryY=0.5;" edge="1" parent="1" source="toolcall" target="osidx"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <!-- note -->
+        <mxCell id="note" value="KEY POINT for review: no existing table is altered. The AI solution adds a read-only derived layer (search content → chunk → embedding) keyed on the SAME uniqueId, so every AI answer/citation resolves back to a real SPARKS document and its OpenSearch _id. Option 2 adds only observability/orchestration entities (AgentSession, AgentToolCall) — still no change to source data." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;align=left;" vertex="1" parent="1">
+          <mxGeometry x="40" y="640" width="500" height="140" as="geometry" />
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

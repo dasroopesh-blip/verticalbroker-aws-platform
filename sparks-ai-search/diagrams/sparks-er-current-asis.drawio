@@ -1,0 +1,121 @@
+<mxfile host="app.diagrams.net" agent="SPARKS-AI-Search" version="24.0.0">
+  <diagram id="sparks-er" name="SPARKS ER Diagram (search-relevant)">
+    <mxGraphModel dx="1400" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1700" pageHeight="1100" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <mxCell id="title" value="SPARKS ER Diagram — Search-Relevant Entities (As-Is)" style="text;html=1;fontSize=20;fontStyle=1;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="300" y="20" width="1100" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="subtitle" value="The outbox table sparks.open_search_json is the hub: each row holds one domain's denormalized document array (osj_json_data) destined for one OpenSearch index. Document fields below are from the real json_*_rec() builder output. Column lists marked (representative) are inferred from the document payload and should be confirmed against DDL." style="text;html=1;fontSize=11;fontStyle=2;align=center;verticalAlign=middle;fontColor=#555555;" vertex="1" parent="1">
+          <mxGeometry x="150" y="60" width="1400" height="36" as="geometry" />
+        </mxCell>
+
+        <!-- ===== HUB: outbox table (confirmed from PL/pgSQL + Lambda) ===== -->
+        <mxCell id="outbox" value="sparks.open_search_json  (OUTBOX / STAGING — confirmed)" style="shape=table;html=1;startSize=30;container=1;collapsible=0;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="640" y="130" width="420" height="230" as="geometry" />
+          <mxCell id="o_r1" value="" style="shape=tableRow;html=1;horizontal=0;startSize=0;collapsible=0;points=[];fillColor=none;" vertex="1" parent="outbox"><mxGeometry y="30" width="420" height="24" as="geometry" /></mxCell>
+          <mxCell id="o_c1a" value="PK" style="shape=partialRectangle;html=1;overflow=hidden;connectable=0;fillColor=none;top=0;left=0;bottom=0;right=0;fontStyle=1;" vertex="1" parent="o_r1"><mxGeometry width="60" height="24" as="geometry" /></mxCell>
+          <mxCell id="o_c1b" value="osj_id  (serial)" style="shape=partialRectangle;html=1;overflow=hidden;connectable=0;fillColor=none;top=0;left=0;bottom=0;right=0;" vertex="1" parent="o_r1"><mxGeometry x="60" width="360" height="24" as="geometry" /></mxCell>
+          <mxCell id="o_r2" value="" style="shape=tableRow;html=1;horizontal=0;startSize=0;collapsible=0;points=[];fillColor=none;" vertex="1" parent="outbox"><mxGeometry y="54" width="420" height="24" as="geometry" /></mxCell>
+          <mxCell id="o_c2a" value="" style="shape=partialRectangle;html=1;overflow=hidden;connectable=0;fillColor=none;top=0;left=0;bottom=0;right=0;" vertex="1" parent="o_r2"><mxGeometry width="60" height="24" as="geometry" /></mxCell>
+          <mxCell id="o_c2b" value="osj_table_index_name  (text)  → target index" style="shape=partialRectangle;html=1;overflow=hidden;connectable=0;fillColor=none;top=0;left=0;bottom=0;right=0;" vertex="1" parent="o_r2"><mxGeometry x="60" width="360" height="24" as="geometry" /></mxCell>
+          <mxCell id="o_r3" value="" style="shape=tableRow;html=1;horizontal=0;startSize=0;collapsible=0;points=[];fillColor=none;" vertex="1" parent="outbox"><mxGeometry y="78" width="420" height="24" as="geometry" /></mxCell>
+          <mxCell id="o_c3a" value="" style="shape=partialRectangle;html=1;overflow=hidden;connectable=0;fillColor=none;top=0;left=0;bottom=0;right=0;" vertex="1" parent="o_r3"><mxGeometry width="60" height="24" as="geometry" /></mxCell>
+          <mxCell id="o_c3b" value="osj_json_data  (json)  → document array" style="shape=partialRectangle;html=1;overflow=hidden;connectable=0;fillColor=none;top=0;left=0;bottom=0;right=0;" vertex="1" parent="o_r3"><mxGeometry x="60" width="360" height="24" as="geometry" /></mxCell>
+          <mxCell id="o_r4" value="" style="shape=tableRow;html=1;horizontal=0;startSize=0;collapsible=0;points=[];fillColor=none;" vertex="1" parent="outbox"><mxGeometry y="102" width="420" height="24" as="geometry" /></mxCell>
+          <mxCell id="o_c4a" value="" style="shape=partialRectangle;html=1;overflow=hidden;connectable=0;fillColor=none;top=0;left=0;bottom=0;right=0;" vertex="1" parent="o_r4"><mxGeometry width="60" height="24" as="geometry" /></mxCell>
+          <mxCell id="o_c4b" value="osj_read_yn  (Y/N)  → queued flag" style="shape=partialRectangle;html=1;overflow=hidden;connectable=0;fillColor=none;top=0;left=0;bottom=0;right=0;" vertex="1" parent="o_r4"><mxGeometry x="60" width="360" height="24" as="geometry" /></mxCell>
+          <mxCell id="o_r5" value="" style="shape=tableRow;html=1;horizontal=0;startSize=0;collapsible=0;points=[];fillColor=none;" vertex="1" parent="outbox"><mxGeometry y="126" width="420" height="24" as="geometry" /></mxCell>
+          <mxCell id="o_c5a" value="" style="shape=partialRectangle;html=1;overflow=hidden;connectable=0;fillColor=none;top=0;left=0;bottom=0;right=0;" vertex="1" parent="o_r5"><mxGeometry width="60" height="24" as="geometry" /></mxCell>
+          <mxCell id="o_c5b" value="osj_processed_yn  (Y/N)  → indexed flag" style="shape=partialRectangle;html=1;overflow=hidden;connectable=0;fillColor=none;top=0;left=0;bottom=0;right=0;" vertex="1" parent="o_r5"><mxGeometry x="60" width="360" height="24" as="geometry" /></mxCell>
+          <mxCell id="o_r6" value="" style="shape=tableRow;html=1;horizontal=0;startSize=0;collapsible=0;points=[];fillColor=none;" vertex="1" parent="outbox"><mxGeometry y="150" width="420" height="24" as="geometry" /></mxCell>
+          <mxCell id="o_c6a" value="" style="shape=partialRectangle;html=1;overflow=hidden;connectable=0;fillColor=none;top=0;left=0;bottom=0;right=0;" vertex="1" parent="o_r6"><mxGeometry width="60" height="24" as="geometry" /></mxCell>
+          <mxCell id="o_c6b" value="osj_create_dt · osj_update_dt  (timestamp)" style="shape=partialRectangle;html=1;overflow=hidden;connectable=0;fillColor=none;top=0;left=0;bottom=0;right=0;" vertex="1" parent="o_r6"><mxGeometry x="60" width="360" height="24" as="geometry" /></mxCell>
+          <mxCell id="o_r7" value="" style="shape=tableRow;html=1;horizontal=0;startSize=0;collapsible=0;points=[];fillColor=none;" vertex="1" parent="outbox"><mxGeometry y="174" width="420" height="24" as="geometry" /></mxCell>
+          <mxCell id="o_c7a" value="" style="shape=partialRectangle;html=1;overflow=hidden;connectable=0;fillColor=none;top=0;left=0;bottom=0;right=0;" vertex="1" parent="o_r7"><mxGeometry width="60" height="24" as="geometry" /></mxCell>
+          <mxCell id="o_c7b" value="osj_create_user · osj_update_user  (text)" style="shape=partialRectangle;html=1;overflow=hidden;connectable=0;fillColor=none;top=0;left=0;bottom=0;right=0;" vertex="1" parent="o_r7"><mxGeometry x="60" width="360" height="24" as="geometry" /></mxCell>
+        </mxCell>
+
+        <!-- ===== Builder note ===== -->
+        <mxCell id="buildernote" value="Populated by PL/pgSQL builders (one per domain):&#10;json_vtf_rec() · json_etf_rec() · json_etfi_rec()&#10;json_gi_rec() · json_vtfi_rec()&#10;json_legacy_vehicle_rec() · json_legacy_equipment_rec()&#10;json_legacy_investigation_rec()&#10;via pushJsonData(json, index) ← pushIndexToOpenSearchTable()" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;align=left;" vertex="1" parent="1">
+          <mxGeometry x="620" y="380" width="460" height="110" as="geometry" />
+        </mxCell>
+
+        <!-- ===== DOMAIN DOC: legacy_equipment (CONFIRMED from payload) ===== -->
+        <mxCell id="legeq" value="legacy_equipment  (document — CONFIRMED from payload)" style="shape=table;html=1;startSize=30;container=1;collapsible=0;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="130" width="360" height="300" as="geometry" />
+          <mxCell id="le_r1" value="uniqueId  (PK, e.g. legacy_equipment:12251)" style="shape=tableRow;html=1;startSize=0;fillColor=none;fontStyle=1;" vertex="1" parent="legeq"><mxGeometry y="30" width="360" height="22" as="geometry" /></mxCell>
+          <mxCell id="le_r2" value="equipment_id · legacy_report_no · file_no" style="shape=tableRow;html=1;startSize=0;fillColor=none;" vertex="1" parent="legeq"><mxGeometry y="52" width="360" height="22" as="geometry" /></mxCell>
+          <mxCell id="le_r3" value="manufacturer · brand · model · model_number" style="shape=tableRow;html=1;startSize=0;fillColor=none;" vertex="1" parent="legeq"><mxGeometry y="74" width="360" height="22" as="geometry" /></mxCell>
+          <mxCell id="le_r4" value="vehicle_make · vehicle_model · vehicle_model_yr" style="shape=tableRow;html=1;startSize=0;fillColor=none;" vertex="1" parent="legeq"><mxGeometry y="96" width="360" height="22" as="geometry" /></mxCell>
+          <mxCell id="le_r5" value="fmvss_code · compliance_prg_name · compliance_prg_yr" style="shape=tableRow;html=1;startSize=0;fillColor=none;" vertex="1" parent="legeq"><mxGeometry y="118" width="360" height="22" as="geometry" /></mxCell>
+          <mxCell id="le_r6" value="lab_name · assigned_to_name · certifying_party" style="shape=tableRow;html=1;startSize=0;fillColor=none;" vertex="1" parent="legeq"><mxGeometry y="140" width="360" height="22" as="geometry" /></mxCell>
+          <mxCell id="le_r7" value="test_results · product_desc" style="shape=tableRow;html=1;startSize=0;fillColor=none;" vertex="1" parent="legeq"><mxGeometry y="162" width="360" height="22" as="geometry" /></mxCell>
+          <mxCell id="le_r8" value="failure_type · failure_desc  (free text → embed)" style="shape=tableRow;html=1;startSize=0;fillColor=#f0f8ec;" vertex="1" parent="legeq"><mxGeometry y="184" width="360" height="22" as="geometry" /></mxCell>
+          <mxCell id="le_r9" value="prob_summary · sme_recc  (free text → embed)" style="shape=tableRow;html=1;startSize=0;fillColor=#f0f8ec;" vertex="1" parent="legeq"><mxGeometry y="206" width="360" height="22" as="geometry" /></mxCell>
+          <mxCell id="le_r10" value="importer · owner_packager · mfr_dot_code" style="shape=tableRow;html=1;startSize=0;fillColor=none;" vertex="1" parent="legeq"><mxGeometry y="228" width="360" height="22" as="geometry" /></mxCell>
+          <mxCell id="le_r11" value="report_accept_dt · create_dt · update_dt" style="shape=tableRow;html=1;startSize=0;fillColor=none;" vertex="1" parent="legeq"><mxGeometry y="250" width="360" height="22" as="geometry" /></mxCell>
+          <mxCell id="le_r12" value="searchModule = &quot;legacyEquipment&quot;" style="shape=tableRow;html=1;startSize=0;fillColor=none;fontStyle=2;" vertex="1" parent="legeq"><mxGeometry y="272" width="360" height="22" as="geometry" /></mxCell>
+        </mxCell>
+
+        <!-- ===== Other domain docs (representative) ===== -->
+        <mxCell id="geninv" value="general_inv  (document — representative)" style="shape=table;html=1;startSize=28;container=1;collapsible=0;fillColor=#e1d5e7;strokeColor=#9673a6;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="470" width="360" height="110" as="geometry" />
+          <mxCell id="gi_r1" value="uniqueId  (PK)  ·  searchModule" style="shape=tableRow;html=1;startSize=0;fillColor=none;fontStyle=1;" vertex="1" parent="geninv"><mxGeometry y="28" width="360" height="24" as="geometry" /></mxCell>
+          <mxCell id="gi_r2" value="investigation fields (id, no, status, dates)" style="shape=tableRow;html=1;startSize=0;fillColor=none;" vertex="1" parent="geninv"><mxGeometry y="52" width="360" height="24" as="geometry" /></mxCell>
+          <mxCell id="gi_r3" value="summary / description free text → embed" style="shape=tableRow;html=1;startSize=0;fillColor=#f3eef7;" vertex="1" parent="geninv"><mxGeometry y="76" width="360" height="24" as="geometry" /></mxCell>
+        </mxCell>
+
+        <mxCell id="vtf" value="vehicle_test_file / vehicle_test_failure_inv  (representative)" style="shape=table;html=1;startSize=28;container=1;collapsible=0;fillColor=#ffe6cc;strokeColor=#d79b00;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="610" width="360" height="110" as="geometry" />
+          <mxCell id="vtf_r1" value="uniqueId  (PK)  ·  searchModule" style="shape=tableRow;html=1;startSize=0;fillColor=none;fontStyle=1;" vertex="1" parent="vtf"><mxGeometry y="28" width="360" height="24" as="geometry" /></mxCell>
+          <mxCell id="vtf_r2" value="vehicle make/model/year · test · lab · dates" style="shape=tableRow;html=1;startSize=0;fillColor=none;" vertex="1" parent="vtf"><mxGeometry y="52" width="360" height="24" as="geometry" /></mxCell>
+          <mxCell id="vtf_r3" value="failure/result free text → embed" style="shape=tableRow;html=1;startSize=0;fillColor=#fff3e0;" vertex="1" parent="vtf"><mxGeometry y="76" width="360" height="24" as="geometry" /></mxCell>
+        </mxCell>
+
+        <mxCell id="etf" value="equip_test_file / equip_test_failure_inv  (representative)" style="shape=table;html=1;startSize=28;container=1;collapsible=0;fillColor=#ffe6cc;strokeColor=#d79b00;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="740" width="360" height="110" as="geometry" />
+          <mxCell id="etf_r1" value="uniqueId  (PK)  ·  searchModule" style="shape=tableRow;html=1;startSize=0;fillColor=none;fontStyle=1;" vertex="1" parent="etf"><mxGeometry y="28" width="360" height="24" as="geometry" /></mxCell>
+          <mxCell id="etf_r2" value="equipment · test · lab · result · dates" style="shape=tableRow;html=1;startSize=0;fillColor=none;" vertex="1" parent="etf"><mxGeometry y="52" width="360" height="24" as="geometry" /></mxCell>
+          <mxCell id="etf_r3" value="failure/result free text → embed" style="shape=tableRow;html=1;startSize=0;fillColor=#fff3e0;" vertex="1" parent="etf"><mxGeometry y="76" width="360" height="24" as="geometry" /></mxCell>
+        </mxCell>
+
+        <mxCell id="legveh" value="legacy_vehicle / legacy_investigation  (representative)" style="shape=table;html=1;startSize=28;container=1;collapsible=0;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="870" width="360" height="110" as="geometry" />
+          <mxCell id="lv_r1" value="uniqueId  (PK)  ·  searchModule" style="shape=tableRow;html=1;startSize=0;fillColor=none;fontStyle=1;" vertex="1" parent="legveh"><mxGeometry y="28" width="360" height="24" as="geometry" /></mxCell>
+          <mxCell id="lv_r2" value="legacy vehicle/investigation fields + dates" style="shape=tableRow;html=1;startSize=0;fillColor=none;" vertex="1" parent="legveh"><mxGeometry y="52" width="360" height="24" as="geometry" /></mxCell>
+          <mxCell id="lv_r3" value="description/finding free text → embed" style="shape=tableRow;html=1;startSize=0;fillColor=#f0f8ec;" vertex="1" parent="legveh"><mxGeometry y="76" width="360" height="24" as="geometry" /></mxCell>
+        </mxCell>
+
+        <!-- ===== OpenSearch indexes (target) ===== -->
+        <mxCell id="osidx" value="Amazon OpenSearch (sparks-stage) — one index per domain" style="shape=table;html=1;startSize=30;container=1;collapsible=0;fillColor=#e6d5f7;strokeColor=#8c4fff;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="640" y="560" width="420" height="250" as="geometry" />
+          <mxCell id="ix1" value="general_inv" style="shape=tableRow;html=1;startSize=0;fillColor=none;" vertex="1" parent="osidx"><mxGeometry y="30" width="420" height="24" as="geometry" /></mxCell>
+          <mxCell id="ix2" value="equip_test_file" style="shape=tableRow;html=1;startSize=0;fillColor=none;" vertex="1" parent="osidx"><mxGeometry y="54" width="420" height="24" as="geometry" /></mxCell>
+          <mxCell id="ix3" value="equip_test_failure_inv" style="shape=tableRow;html=1;startSize=0;fillColor=none;" vertex="1" parent="osidx"><mxGeometry y="78" width="420" height="24" as="geometry" /></mxCell>
+          <mxCell id="ix4" value="vehicle_test_failure_inv" style="shape=tableRow;html=1;startSize=0;fillColor=none;" vertex="1" parent="osidx"><mxGeometry y="102" width="420" height="24" as="geometry" /></mxCell>
+          <mxCell id="ix5" value="vehicle_test_file" style="shape=tableRow;html=1;startSize=0;fillColor=none;" vertex="1" parent="osidx"><mxGeometry y="126" width="420" height="24" as="geometry" /></mxCell>
+          <mxCell id="ix6" value="legacy_vehicle" style="shape=tableRow;html=1;startSize=0;fillColor=none;" vertex="1" parent="osidx"><mxGeometry y="150" width="420" height="24" as="geometry" /></mxCell>
+          <mxCell id="ix7" value="legacy_equipment" style="shape=tableRow;html=1;startSize=0;fillColor=none;" vertex="1" parent="osidx"><mxGeometry y="174" width="420" height="24" as="geometry" /></mxCell>
+          <mxCell id="ix8" value="legacy_investigation" style="shape=tableRow;html=1;startSize=0;fillColor=none;" vertex="1" parent="osidx"><mxGeometry y="198" width="420" height="24" as="geometry" /></mxCell>
+          <mxCell id="ix9" value="_id  ← stamped from uniqueId via _stableId()" style="shape=tableRow;html=1;startSize=0;fillColor=#f3eefb;fontStyle=2;" vertex="1" parent="osidx"><mxGeometry y="222" width="420" height="24" as="geometry" /></mxCell>
+        </mxCell>
+
+        <!-- ===== relationships ===== -->
+        <mxCell id="r_le_out" value="1 row per domain refresh (osj_table_index_name)" style="edgeStyle=entityRelationEdgeStyle;html=1;endArrow=ERmany;startArrow=ERone;rounded=0;exitX=1;exitY=0.5;entryX=0;entryY=0.3;" edge="1" parent="1" source="legeq" target="outbox"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="r_gi_out" style="edgeStyle=entityRelationEdgeStyle;html=1;endArrow=ERmany;startArrow=ERone;rounded=0;exitX=1;exitY=0.3;entryX=0;entryY=0.6;" edge="1" parent="1" source="geninv" target="outbox"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="r_vtf_out" style="edgeStyle=entityRelationEdgeStyle;html=1;endArrow=ERmany;startArrow=ERone;rounded=0;exitX=1;exitY=0.3;entryX=0;entryY=0.75;" edge="1" parent="1" source="vtf" target="outbox"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="r_etf_out" style="edgeStyle=entityRelationEdgeStyle;html=1;endArrow=ERmany;startArrow=ERone;rounded=0;exitX=1;exitY=0.3;entryX=0;entryY=0.9;" edge="1" parent="1" source="etf" target="outbox"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <mxCell id="r_out_os" value="1 outbox row → 1 index (osj_table_index_name); docs keyed by uniqueId → _id" style="edgeStyle=entityRelationEdgeStyle;html=1;endArrow=ERmany;startArrow=ERone;rounded=0;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="outbox" target="osidx"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <mxCell id="note" value="NOTE: osj_json_data holds the full denormalized document array — SPARKS already joins the underlying operational tables inside the json_*_rec() builders, so the search layer is document-oriented (not normalized). The AI search content reuses these same documents and the uniqueId key." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;align=left;" vertex="1" parent="1">
+          <mxGeometry x="440" y="880" width="620" height="100" as="geometry" />
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

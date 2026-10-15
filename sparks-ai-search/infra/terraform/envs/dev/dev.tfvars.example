@@ -1,0 +1,33 @@
+###############################################################################
+# dev.tfvars.example — copy to dev.tfvars and fill in real values.
+#   cp dev.tfvars.example dev.tfvars
+# NEVER commit dev.tfvars if it contains anything sensitive.
+###############################################################################
+
+env         = "dev"
+aws_region  = "us-east-1"          # MUST match SPARKS data residency region
+cost_center = "SPARKS-AI"
+
+# --- Networking (private data plane) ---
+vpc_id             = "vpc-xxxxxxxx"
+private_subnet_ids = ["subnet-aaaa", "subnet-bbbb"]
+
+# --- Read-only data access ---
+sparks_db_secret_arn = "arn:aws:secretsmanager:us-east-1:ACCOUNT:secret:sparks-ro-xxxx"
+# Point at a read-only VIEW if DBAs prefer:
+# outbox_read_sql = "SELECT osj_id, osj_table_index_name, osj_json_data, osj_update_dt FROM sparks.open_search_json_ro"
+
+# --- Bedrock model IDs (confirm these are ENABLED in the account) ---
+bedrock_embedding_model_id = "amazon.titan-embed-text-v2:0"
+bedrock_answer_model_id    = "anthropic.claude-3-5-sonnet-20240620-v1:0"
+bedrock_cheap_model_id     = "anthropic.claude-3-haiku-20240307-v1:0"
+
+# --- Behavior ---
+enable_agent         = false        # false = Option 1 (RAG) only; true = add Option 2 (Agentic)
+refresh_schedule     = "rate(15 minutes)"
+top_k                = 8
+agent_max_tool_calls = 6
+
+# --- Cost guardrail (Dev pilot) ---
+monthly_budget_usd  = 200
+budget_alert_emails = ["you@dot.gov"]
