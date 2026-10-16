@@ -36,6 +36,30 @@ This proposal narrows the AI choices to two practical architectures:
 
 The existing indexing flow is intentionally retained as the baseline. It uses PostgreSQL functions to create denormalized domain JSON, stages the payload in `sparks.open_search_json`, uses SQS as transport, and indexes the documents into Amazon OpenSearch.
 
+**SPARKS Current OpenSearch Indexing Flow** — *existing production pattern, unchanged by the AI proposal:*
+
+<!--
+::flow:: Current OpenSearch Indexing Flow
+PostgreSQL :: Domain JSON builder functions create denormalized search document arrays. ||
+open_search_json :: pushJsonData() stages JSON and sets read=false / processed=false. ||
+RDS → SQS :: Scheduled Lambda selects unread rows and sends osj_id + index name to SearchQueue.fifo. ||
+SQS → OpenSearch :: Consumer re-fetches JSON by osj_id, assigns stable IDs, bulk-indexes documents, then marks processed=true. ||
+OpenSearch :: Current SPARKS keyword, pills and filter search continues to query the indexed documents.
+::note:: SQS carries IDs, not the full JSON payload.
+::note:: The existing Lambdas, queue, JSON builders, flags and indexes remain unchanged.
+::endflow::
+-->
+
+```mermaid
+flowchart LR
+    A["<b>PostgreSQL</b><br/>Domain JSON builders create<br/>denormalized search docs"]
+    B["<b>open_search_json</b><br/>pushJsonData() stages JSON;<br/>read=false / processed=false"]
+    C["<b>RDS → SQS</b><br/>Scheduled Lambda sends<br/>osj_id + index to SearchQueue.fifo"]
+    D["<b>SQS → OpenSearch</b><br/>Consumer re-fetches by osj_id,<br/>stable IDs, bulk-index, processed=true"]
+    E["<b>OpenSearch</b><br/>Keyword / pills / filter<br/>search over indexed docs"]
+    A --> B --> C --> D --> E
+```
+
 ### Exact sequence and state logic
 
 1. An EventBridge schedule invokes the RDS-to-SQS Lambda on its configured cadence.
@@ -88,6 +112,30 @@ The existing indexing flow is intentionally retained as the baseline. It uses Po
 
 Option 1 adds a new AI retrieval path without modifying the existing OpenSearch indexing path. The goal is to let users ask questions in natural language and receive grounded answers, summaries, similar cases, citations, and follow-up questions.
 
+**Option 1 flow** — *separate AI retrieval path; current OpenSearch indexing remains untouched:*
+
+<!--
+::flow:: Option 1 — Generative AI / RAG Search
+SPARKS Data :: Read-only source. Reuse current domain JSON where sufficient; enrich or create AI-specific domain JSON for gaps. ||
+AI Data Prep :: Normalize and curate approved investigation, vehicle, equipment, test and reference content. Preserve source record identifiers. ||
+RAG Search Content :: Store curated content in an approved AI data layer and index embeddings in a vector store. ||
+Bedrock + Claude :: Retrieve relevant chunks, apply metadata filters, and generate a grounded answer with source citations. ||
+Ask SPARKS :: Natural-language questions, summaries, similar cases, citations and follow-up questions in the SPARKS UI.
+::note:: No direct agent access to operational PostgreSQL is required.
+::note:: Coverage can expand beyond today's search JSON by enriching the AI search content.
+::endflow::
+-->
+
+```mermaid
+flowchart LR
+    A["<b>SPARKS Data</b><br/>Read-only source; reuse/enrich<br/>domain JSON, keep source IDs"]
+    B["<b>AI Data Prep</b><br/>Normalize + curate approved<br/>content; preserve source keys"]
+    C["<b>RAG Search Content</b><br/>Curated content + embeddings<br/>in a vector store"]
+    D["<b>Bedrock + Claude</b><br/>Retrieve chunks, filter,<br/>generate grounded answer + citations"]
+    E["<b>Ask SPARKS</b><br/>NL questions, summaries,<br/>similar cases, follow-ups in the UI"]
+    A --> B --> C --> D --> E
+```
+
 ### How it works
 
 1. Use an approved read-only source from SPARKS. Start by reusing existing domain JSON where it contains the required data.
@@ -125,6 +173,30 @@ Option 1 adds a new AI retrieval path without modifying the existing OpenSearch 
 ## 5. Option 2 — Agentic Hybrid Search
 
 Option 2 adds an orchestration layer that can decide how to answer a question using a controlled set of SPARKS tools. It is appropriate when a single question may require several retrieval steps, exact filters, semantic similarity, record lookups, or multiple approved sources.
+
+**Option 2 flow** — *an orchestration layer chooses approved search tools for complex, multi-step questions:*
+
+<!--
+::flow:: Option 2 — Agentic Hybrid Search
+Ask SPARKS :: User asks one natural-language question, including multi-part comparisons or follow-ups. ||
+Agent Orchestrator :: Understand intent, plan steps, select approved tools, combine results and enforce guardrails. ||
+Approved Tools :: Existing OpenSearch exact/filter search + semantic/vector retrieval + read-only record/detail APIs. ||
+Claude :: Synthesize results, reason across retrieved records, and generate a grounded response. ||
+Response :: Answer + structured results + source links/citations + follow-up questions.
+::note:: No unrestricted SQL tool.
+::note:: Existing OpenSearch becomes one tool; RAG/vector retrieval becomes another.
+::endflow::
+-->
+
+```mermaid
+flowchart LR
+    A["<b>Ask SPARKS</b><br/>One NL question; multi-part<br/>comparisons or follow-ups"]
+    B["<b>Agent Orchestrator</b><br/>Plan steps, select approved<br/>tools, combine, enforce guardrails"]
+    C["<b>Approved Tools</b><br/>OpenSearch exact/filter +<br/>semantic/vector + read-only APIs"]
+    D["<b>Claude</b><br/>Synthesize, reason across<br/>records, generate grounded answer"]
+    E["<b>Response</b><br/>Answer + results + source<br/>links/citations + follow-ups"]
+    A --> B --> C --> D --> E
+```
 
 ### Approved tool model
 

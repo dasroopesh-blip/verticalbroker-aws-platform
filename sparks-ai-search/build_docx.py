@@ -65,6 +65,51 @@ def para(text="", style=None, bullet=False, number=False, quote=False, hr=False)
         body = runs(text)
     return f"<w:p>{ppr_xml}{body}</w:p>"
 
+FLOW_FILLS = ["DAE8FC", "FFE6CC", "E1D5E7", "D5E8D4", "DAE8FC"]
+FLOW_EDGES = ["6C8EBF", "D79B00", "9673A6", "82B366", "6C8EBF"]
+
+def flow_diagram(title, steps, notes):
+    """Render a horizontal flow as a borderless table: box | ▶ | box | ▶ | box ..."""
+    out = []
+    if title:
+        out.append('<w:p><w:pPr><w:jc w:val="center"/><w:spacing w:before="120" w:after="80"/></w:pPr>'
+                   f'<w:r><w:rPr><w:b/><w:color w:val="1F3864"/><w:sz w:val="24"/></w:rPr>'
+                   f'<w:t xml:space="preserve">{esc(title)}</w:t></w:r></w:p>')
+    # build cells: alternating box and arrow
+    ncols = len(steps) * 2 - 1 if steps else 0
+    grid = '<w:tblGrid>' + ''.join('<w:gridCol/>' for _ in range(ncols)) + '</w:tblGrid>'
+    tblpr = ('<w:tblPr><w:tblW w:w="5000" w:type="pct"/>'
+             '<w:tblLayout w:type="fixed"/><w:jc w:val="center"/></w:tblPr>')
+    cells = []
+    for idx, (h, body) in enumerate(steps):
+        fill = FLOW_FILLS[idx % len(FLOW_FILLS)]
+        edge = FLOW_EDGES[idx % len(FLOW_EDGES)]
+        bdr = (f'<w:tcBorders>'
+               f'<w:top w:val="single" w:sz="12" w:color="{edge}"/>'
+               f'<w:left w:val="single" w:sz="12" w:color="{edge}"/>'
+               f'<w:bottom w:val="single" w:sz="12" w:color="{edge}"/>'
+               f'<w:right w:val="single" w:sz="12" w:color="{edge}"/></w:tcBorders>')
+        hpar = ('<w:p><w:pPr><w:jc w:val="center"/><w:spacing w:after="40"/></w:pPr>'
+                f'<w:r><w:rPr><w:b/><w:sz w:val="18"/></w:rPr>'
+                f'<w:t xml:space="preserve">{esc(h)}</w:t></w:r></w:p>')
+        bpar = ('<w:p><w:pPr><w:jc w:val="center"/><w:spacing w:after="0"/></w:pPr>'
+                f'<w:r><w:rPr><w:sz w:val="15"/></w:rPr>'
+                f'<w:t xml:space="preserve">{esc(body)}</w:t></w:r></w:p>')
+        cells.append(f'<w:tc><w:tcPr><w:tcW w:w="0" w:type="auto"/>'
+                     f'<w:shd w:val="clear" w:fill="{fill}"/>{bdr}'
+                     f'<w:vAlign w:val="center"/></w:tcPr>{hpar}{bpar}</w:tc>')
+        if idx < len(steps) - 1:
+            cells.append('<w:tc><w:tcPr><w:tcW w:w="300" w:type="dxa"/>'
+                         '<w:vAlign w:val="center"/></w:tcPr>'
+                         '<w:p><w:pPr><w:jc w:val="center"/></w:pPr>'
+                         '<w:r><w:rPr><w:color w:val="2E74B5"/><w:sz w:val="24"/></w:rPr>'
+                         '<w:t>&#9654;</w:t></w:r></w:p></w:tc>')
+    out.append(f'<w:tbl>{tblpr}{grid}<w:tr>{"".join(cells)}</w:tr></w:tbl>')
+    for n in notes:
+        out.append(para(n, bullet=True))
+    out.append(para(""))  # spacer
+    return "".join(out)
+
 def table(rows):
     # rows: list of list[str]; first row = header
     grid_cols = max(len(r) for r in rows)
@@ -100,6 +145,40 @@ def parse(md: str):
     while i < len(lines):
         line = lines[i]
         s = line.rstrip()
+
+        # ::flow:: ... ::endflow::  -> styled horizontal box diagram
+        if s.strip().startswith("::flow::"):
+            title = s.strip()[len("::flow::"):].strip()
+            i += 1
+            steps = []; notes = []; buf = ""
+            def _flush(b):
+                b = b.strip().rstrip("|").strip()
+                if not b: return
+                if "::" in b:
+                    h, _, body = b.partition("::")
+                    steps.append((h.strip(), body.strip()))
+                else:
+                    steps.append(("", b))
+            while i < len(lines) and lines[i].strip() != "::endflow::":
+                ln = lines[i].strip()
+                if ln.startswith("::note::"):
+                    notes.append(ln[len("::note::"):].strip()); i += 1; continue
+                buf += " " + ln
+                while "||" in buf:
+                    part, _, buf = buf.partition("||"); _flush(part)
+                i += 1
+            _flush(buf)
+            i += 1  # skip ::endflow::
+            blocks.append(("flow", (title, steps, notes)))
+            continue
+
+        # ```mermaid ... ```  -> skip in Word (flow diagram already rendered)
+        if s.strip().startswith("```mermaid"):
+            i += 1
+            while i < len(lines) and not lines[i].strip().startswith("```"):
+                i += 1
+            i += 1  # skip closing fence
+            continue
 
         # table: collect consecutive pipe rows
         if s.strip().startswith("|") and s.strip().endswith("|"):
@@ -155,6 +234,9 @@ def body_xml(blocks):
         elif kind == "table":
             out.append(table(val))
             out.append(para(""))  # spacer
+        elif kind == "flow":
+            title, steps, notes = val
+            out.append(flow_diagram(title, steps, notes))
     return "".join(out)
 
 # ---------- OOXML part templates ----------
@@ -206,6 +288,8 @@ DOC_TMPL = '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 def main():
     with open(SRC, encoding="utf-8") as f:
         md = f.read()
+    # unwrap HTML-comment-hidden flow blocks (comment keeps GitHub clean)
+    md = re.sub(r"<!--\s*(::flow::.*?::endflow::)\s*-->", r"\1", md, flags=re.S)
     blocks = parse(md)
     document = DOC_TMPL.format(body=body_xml(blocks))
     with zipfile.ZipFile(OUT, "w", zipfile.ZIP_DEFLATED) as z:

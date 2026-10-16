@@ -33,6 +33,58 @@ def convert(md):
     while i < len(lines):
         s = lines[i].rstrip()
         st = s.strip()
+        # ---- custom ::flow:: ... ::endflow:: block -> styled 5-box diagram ----
+        if st.startswith("::flow::"):
+            close_list()
+            title = st[len("::flow::"):].strip()
+            i += 1
+            steps = []   # (heading, body)
+            notes = []
+            buf = ""
+            def flush(b):
+                b = b.strip().rstrip("|").strip()
+                if not b: return
+                if "::" in b:
+                    h, _, body = b.partition("::")
+                    steps.append((h.strip(), body.strip()))
+                else:
+                    steps.append(("", b))
+            while i < len(lines) and lines[i].strip() != "::endflow::":
+                ln = lines[i].strip()
+                if ln.startswith("::note::"):
+                    notes.append(ln[len("::note::"):].strip())
+                    i += 1; continue
+                buf += " " + ln
+                while "||" in buf:
+                    part, _, buf = buf.partition("||")
+                    flush(part)
+                i += 1
+            flush(buf)
+            i += 1  # skip ::endflow::
+            html = ["<div class='flow-wrap'>"]
+            if title: html.append(f"<div class='flow-title'>{inline(title)}</div>")
+            html.append("<div class='flow'>")
+            for idx, (h, body) in enumerate(steps):
+                cls = f"flow-box c{idx % 5}"
+                html.append(f"<div class='{cls}'><div class='fb-h'>{inline(h)}</div>"
+                            f"<div class='fb-b'>{inline(body)}</div></div>")
+                if idx < len(steps) - 1:
+                    html.append("<div class='flow-arrow'>&#9654;</div>")
+            html.append("</div>")
+            if notes:
+                html.append("<ul class='flow-notes'>" +
+                            "".join(f"<li>{inline(n)}</li>" for n in notes) + "</ul>")
+            html.append("</div>")
+            out.append("".join(html))
+            continue
+        # ---- mermaid code fence: skip in HTML (flow box already shown) ----
+        if st.startswith("```mermaid"):
+            while i < len(lines) and not lines[i].strip().startswith("```") or lines[i].strip() == "```mermaid":
+                i += 1
+                if i < len(lines) and lines[i].strip() == "```":
+                    break
+            i += 1
+            continue
         # table
         if st.startswith("|") and st.endswith("|"):
             close_list()
@@ -93,6 +145,25 @@ th, td { border:1px solid #ccc; padding:6px 9px; text-align:left; vertical-align
 th { background:#eef2f7; }
 hr { border:0; border-top:1px solid #ccc; margin:1.4rem 0; }
 a { color: var(--blue); }
+/* ---- flow diagram ---- */
+.flow-wrap { margin: 1rem 0 1.4rem; }
+.flow-title { text-align:center; font-weight:700; color:var(--navy); font-size:1.05rem; margin-bottom:.7rem; }
+.flow { display:flex; align-items:stretch; justify-content:center; flex-wrap:nowrap; gap:0; }
+.flow-box { flex:1 1 0; min-width:0; border:2px solid; border-radius:10px; padding:10px 10px;
+            text-align:center; background:#fff; }
+.flow-box .fb-h { font-weight:700; font-size:.9rem; margin-bottom:5px; }
+.flow-box .fb-b { font-size:.76rem; line-height:1.35; color:#333; }
+.flow-box.c0 { border-color:#6C8EBF; background:#DAE8FC; }
+.flow-box.c1 { border-color:#D79B00; background:#FFE6CC; }
+.flow-box.c2 { border-color:#9673A6; background:#E1D5E7; }
+.flow-box.c3 { border-color:#82B366; background:#D5E8D4; }
+.flow-box.c4 { border-color:#6C8EBF; background:#DAE8FC; }
+.flow-arrow { display:flex; align-items:center; color:#2E74B5; font-size:1rem; padding:0 4px; }
+.flow-notes { margin:.6rem 0 0; font-size:.82rem; color:#444; }
+@media print {
+  .flow-box .fb-b { font-size:8pt; }
+  .flow-wrap, .flow { page-break-inside: avoid; }
+}
 @media print {
   body { margin:0; max-width:none; font-size:11pt; }
   h1 { font-size:18pt; } h2 { font-size:14pt; } h3 { font-size:12pt; }
@@ -105,6 +176,7 @@ a { color: var(--blue); }
 def main():
     with open(SRC, encoding="utf-8") as f:
         md = f.read()
+    md = re.sub(r"<!--\s*(::flow::.*?::endflow::)\s*-->", r"\1", md, flags=re.S)
     body = convert(md)
     html = (f"<!doctype html><html lang='en'><head><meta charset='utf-8'>"
             f"<meta name='viewport' content='width=device-width, initial-scale=1'>"

@@ -17,6 +17,25 @@ th, td { border:1px solid #ccc; padding:6px 9px; text-align:left; vertical-align
 th { background:#eef2f7; }
 hr { border:0; border-top:1px solid #ccc; margin:1.4rem 0; }
 a { color: var(--blue); }
+/* ---- flow diagram ---- */
+.flow-wrap { margin: 1rem 0 1.4rem; }
+.flow-title { text-align:center; font-weight:700; color:var(--navy); font-size:1.05rem; margin-bottom:.7rem; }
+.flow { display:flex; align-items:stretch; justify-content:center; flex-wrap:nowrap; gap:0; }
+.flow-box { flex:1 1 0; min-width:0; border:2px solid; border-radius:10px; padding:10px 10px;
+            text-align:center; background:#fff; }
+.flow-box .fb-h { font-weight:700; font-size:.9rem; margin-bottom:5px; }
+.flow-box .fb-b { font-size:.76rem; line-height:1.35; color:#333; }
+.flow-box.c0 { border-color:#6C8EBF; background:#DAE8FC; }
+.flow-box.c1 { border-color:#D79B00; background:#FFE6CC; }
+.flow-box.c2 { border-color:#9673A6; background:#E1D5E7; }
+.flow-box.c3 { border-color:#82B366; background:#D5E8D4; }
+.flow-box.c4 { border-color:#6C8EBF; background:#DAE8FC; }
+.flow-arrow { display:flex; align-items:center; color:#2E74B5; font-size:1rem; padding:0 4px; }
+.flow-notes { margin:.6rem 0 0; font-size:.82rem; color:#444; }
+@media print {
+  .flow-box .fb-b { font-size:8pt; }
+  .flow-wrap, .flow { page-break-inside: avoid; }
+}
 @media print {
   body { margin:0; max-width:none; font-size:11pt; }
   h1 { font-size:18pt; } h2 { font-size:14pt; } h3 { font-size:12pt; }
@@ -50,6 +69,8 @@ a { color: var(--blue); }
 <hr/>
 <h2>2. Current State — As-Is Search</h2>
 <p>The existing indexing flow is intentionally retained as the baseline. It uses PostgreSQL functions to create denormalized domain JSON, stages the payload in <code>sparks.open_search_json</code>, uses SQS as transport, and indexes the documents into Amazon OpenSearch.</p>
+<p><strong>SPARKS Current OpenSearch Indexing Flow</strong> — *existing production pattern, unchanged by the AI proposal:*</p>
+<div class='flow-wrap'><div class='flow-title'>Current OpenSearch Indexing Flow</div><div class='flow'><div class='flow-box c0'><div class='fb-h'>PostgreSQL</div><div class='fb-b'>Domain JSON builder functions create denormalized search document arrays.</div></div><div class='flow-arrow'>&#9654;</div><div class='flow-box c1'><div class='fb-h'>open_search_json</div><div class='fb-b'>pushJsonData() stages JSON and sets read=false / processed=false.</div></div><div class='flow-arrow'>&#9654;</div><div class='flow-box c2'><div class='fb-h'>RDS → SQS</div><div class='fb-b'>Scheduled Lambda selects unread rows and sends osj_id + index name to SearchQueue.fifo.</div></div><div class='flow-arrow'>&#9654;</div><div class='flow-box c3'><div class='fb-h'>SQS → OpenSearch</div><div class='fb-b'>Consumer re-fetches JSON by osj_id, assigns stable IDs, bulk-indexes documents, then marks processed=true.</div></div><div class='flow-arrow'>&#9654;</div><div class='flow-box c4'><div class='fb-h'>OpenSearch</div><div class='fb-b'>Current SPARKS keyword, pills and filter search continues to query the indexed documents.</div></div></div><ul class='flow-notes'><li>SQS carries IDs, not the full JSON payload.</li><li>The existing Lambdas, queue, JSON builders, flags and indexes remain unchanged.</li></ul></div>
 <h3>Exact sequence and state logic</h3>
 <ol>
 <li>An EventBridge schedule invokes the RDS-to-SQS Lambda on its configured cadence.</li>
@@ -97,6 +118,8 @@ a { color: var(--blue); }
 <hr/>
 <h2>4. Option 1 — Generative AI / RAG Search</h2>
 <p>Option 1 adds a new AI retrieval path without modifying the existing OpenSearch indexing path. The goal is to let users ask questions in natural language and receive grounded answers, summaries, similar cases, citations, and follow-up questions.</p>
+<p><strong>Option 1 flow</strong> — *separate AI retrieval path; current OpenSearch indexing remains untouched:*</p>
+<div class='flow-wrap'><div class='flow-title'>Option 1 — Generative AI / RAG Search</div><div class='flow'><div class='flow-box c0'><div class='fb-h'>SPARKS Data</div><div class='fb-b'>Read-only source. Reuse current domain JSON where sufficient; enrich or create AI-specific domain JSON for gaps.</div></div><div class='flow-arrow'>&#9654;</div><div class='flow-box c1'><div class='fb-h'>AI Data Prep</div><div class='fb-b'>Normalize and curate approved investigation, vehicle, equipment, test and reference content. Preserve source record identifiers.</div></div><div class='flow-arrow'>&#9654;</div><div class='flow-box c2'><div class='fb-h'>RAG Search Content</div><div class='fb-b'>Store curated content in an approved AI data layer and index embeddings in a vector store.</div></div><div class='flow-arrow'>&#9654;</div><div class='flow-box c3'><div class='fb-h'>Bedrock + Claude</div><div class='fb-b'>Retrieve relevant chunks, apply metadata filters, and generate a grounded answer with source citations.</div></div><div class='flow-arrow'>&#9654;</div><div class='flow-box c4'><div class='fb-h'>Ask SPARKS</div><div class='fb-b'>Natural-language questions, summaries, similar cases, citations and follow-up questions in the SPARKS UI.</div></div></div><ul class='flow-notes'><li>No direct agent access to operational PostgreSQL is required.</li><li>Coverage can expand beyond today's search JSON by enriching the AI search content.</li></ul></div>
 <h3>How it works</h3>
 <ol>
 <li>Use an approved read-only source from SPARKS. Start by reusing existing domain JSON where it contains the required data.</li>
@@ -130,6 +153,8 @@ a { color: var(--blue); }
 <hr/>
 <h2>5. Option 2 — Agentic Hybrid Search</h2>
 <p>Option 2 adds an orchestration layer that can decide how to answer a question using a controlled set of SPARKS tools. It is appropriate when a single question may require several retrieval steps, exact filters, semantic similarity, record lookups, or multiple approved sources.</p>
+<p><strong>Option 2 flow</strong> — *an orchestration layer chooses approved search tools for complex, multi-step questions:*</p>
+<div class='flow-wrap'><div class='flow-title'>Option 2 — Agentic Hybrid Search</div><div class='flow'><div class='flow-box c0'><div class='fb-h'>Ask SPARKS</div><div class='fb-b'>User asks one natural-language question, including multi-part comparisons or follow-ups.</div></div><div class='flow-arrow'>&#9654;</div><div class='flow-box c1'><div class='fb-h'>Agent Orchestrator</div><div class='fb-b'>Understand intent, plan steps, select approved tools, combine results and enforce guardrails.</div></div><div class='flow-arrow'>&#9654;</div><div class='flow-box c2'><div class='fb-h'>Approved Tools</div><div class='fb-b'>Existing OpenSearch exact/filter search + semantic/vector retrieval + read-only record/detail APIs.</div></div><div class='flow-arrow'>&#9654;</div><div class='flow-box c3'><div class='fb-h'>Claude</div><div class='fb-b'>Synthesize results, reason across retrieved records, and generate a grounded response.</div></div><div class='flow-arrow'>&#9654;</div><div class='flow-box c4'><div class='fb-h'>Response</div><div class='fb-b'>Answer + structured results + source links/citations + follow-up questions.</div></div></div><ul class='flow-notes'><li>No unrestricted SQL tool.</li><li>Existing OpenSearch becomes one tool; RAG/vector retrieval becomes another.</li></ul></div>
 <h3>Approved tool model</h3>
 <table>
 <tr><th>Tool</th><th>Purpose</th></tr>
