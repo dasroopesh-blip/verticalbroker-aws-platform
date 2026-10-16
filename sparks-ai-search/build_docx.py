@@ -75,11 +75,23 @@ def flow_diagram(title, steps, notes):
         out.append('<w:p><w:pPr><w:jc w:val="center"/><w:spacing w:before="120" w:after="80"/></w:pPr>'
                    f'<w:r><w:rPr><w:b/><w:color w:val="1F3864"/><w:sz w:val="24"/></w:rPr>'
                    f'<w:t xml:space="preserve">{esc(title)}</w:t></w:r></w:p>')
-    # build cells: alternating box and arrow
-    ncols = len(steps) * 2 - 1 if steps else 0
+    # build cells: alternating box and arrow.
+    # Use EXPLICIT percentage widths so boxes split the full page width evenly and
+    # text wraps (grows the row height) instead of being clipped.
+    n = len(steps)
+    ncols = n * 2 - 1 if steps else 0
+    # pct units are 1/50 of a percent (5000 = 100%). Split: boxes get the bulk, arrows tiny.
+    arrow_pct = 180                      # ~3.6% per arrow
+    box_pct = (5000 - arrow_pct * (n - 1)) // n if n else 0
+    # grid columns must mirror the per-cell widths (in pct too, via w:w on gridCol is dxa;
+    # for fixed+pct we still provide a gridCol per column — Word uses the tcW pct values)
     grid = '<w:tblGrid>' + ''.join('<w:gridCol/>' for _ in range(ncols)) + '</w:tblGrid>'
     tblpr = ('<w:tblPr><w:tblW w:w="5000" w:type="pct"/>'
-             '<w:tblLayout w:type="fixed"/><w:jc w:val="center"/></w:tblPr>')
+             '<w:tblLayout w:type="fixed"/><w:jc w:val="center"/>'
+             '<w:tblCellMar>'
+             '<w:top w:w="60" w:type="dxa"/><w:left w:w="60" w:type="dxa"/>'
+             '<w:bottom w:w="60" w:type="dxa"/><w:right w:w="60" w:type="dxa"/>'
+             '</w:tblCellMar></w:tblPr>')
     cells = []
     for idx, (h, body) in enumerate(steps):
         fill = FLOW_FILLS[idx % len(FLOW_FILLS)]
@@ -89,22 +101,24 @@ def flow_diagram(title, steps, notes):
                f'<w:left w:val="single" w:sz="12" w:color="{edge}"/>'
                f'<w:bottom w:val="single" w:sz="12" w:color="{edge}"/>'
                f'<w:right w:val="single" w:sz="12" w:color="{edge}"/></w:tcBorders>')
-        hpar = ('<w:p><w:pPr><w:jc w:val="center"/><w:spacing w:after="40"/></w:pPr>'
-                f'<w:r><w:rPr><w:b/><w:sz w:val="18"/></w:rPr>'
+        hpar = ('<w:p><w:pPr><w:jc w:val="center"/><w:spacing w:after="40" w:line="240" w:lineRule="auto"/></w:pPr>'
+                f'<w:r><w:rPr><w:b/><w:sz w:val="17"/></w:rPr>'
                 f'<w:t xml:space="preserve">{esc(h)}</w:t></w:r></w:p>')
-        bpar = ('<w:p><w:pPr><w:jc w:val="center"/><w:spacing w:after="0"/></w:pPr>'
-                f'<w:r><w:rPr><w:sz w:val="15"/></w:rPr>'
+        bpar = ('<w:p><w:pPr><w:jc w:val="center"/><w:spacing w:after="0" w:line="216" w:lineRule="auto"/></w:pPr>'
+                f'<w:r><w:rPr><w:sz w:val="14"/></w:rPr>'
                 f'<w:t xml:space="preserve">{esc(body)}</w:t></w:r></w:p>')
-        cells.append(f'<w:tc><w:tcPr><w:tcW w:w="0" w:type="auto"/>'
+        cells.append(f'<w:tc><w:tcPr><w:tcW w:w="{box_pct}" w:type="pct"/>'
                      f'<w:shd w:val="clear" w:fill="{fill}"/>{bdr}'
                      f'<w:vAlign w:val="center"/></w:tcPr>{hpar}{bpar}</w:tc>')
-        if idx < len(steps) - 1:
-            cells.append('<w:tc><w:tcPr><w:tcW w:w="300" w:type="dxa"/>'
+        if idx < n - 1:
+            cells.append(f'<w:tc><w:tcPr><w:tcW w:w="{arrow_pct}" w:type="pct"/>'
+                         '<w:tcBorders><w:top w:val="nil"/><w:left w:val="nil"/>'
+                         '<w:bottom w:val="nil"/><w:right w:val="nil"/></w:tcBorders>'
                          '<w:vAlign w:val="center"/></w:tcPr>'
-                         '<w:p><w:pPr><w:jc w:val="center"/></w:pPr>'
-                         '<w:r><w:rPr><w:color w:val="2E74B5"/><w:sz w:val="24"/></w:rPr>'
+                         '<w:p><w:pPr><w:jc w:val="center"/><w:spacing w:after="0"/></w:pPr>'
+                         '<w:r><w:rPr><w:color w:val="2E74B5"/><w:sz w:val="22"/></w:rPr>'
                          '<w:t>&#9654;</w:t></w:r></w:p></w:tc>')
-    out.append(f'<w:tbl>{tblpr}{grid}<w:tr>{"".join(cells)}</w:tr></w:tbl>')
+    out.append(f'<w:tbl>{tblpr}{grid}<w:tr><w:trPr><w:jc w:val="center"/></w:trPr>{"".join(cells)}</w:tr></w:tbl>')
     for n in notes:
         out.append(para(n, bullet=True))
     out.append(para(""))  # spacer
@@ -282,7 +296,7 @@ NUMBERING = '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 DOC_TMPL = '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
 <w:body>{body}
-<w:sectPr><w:pgSz w:w="12240" w:h="15840"/><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440" w:header="720" w:footer="720" w:gutter="0"/></w:sectPr>
+<w:sectPr><w:pgSz w:w="12240" w:h="15840"/><w:pgMar w:top="1152" w:right="864" w:bottom="1152" w:left="864" w:header="720" w:footer="720" w:gutter="0"/></w:sectPr>
 </w:body></w:document>'''
 
 def main():
