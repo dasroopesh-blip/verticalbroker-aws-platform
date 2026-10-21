@@ -204,23 +204,23 @@ OPTION2_NOTES = [
     "Existing OpenSearch becomes one tool; RAG / vector retrieval becomes another.",
 ]
 
-# ---- AI image/PDF extraction cost flow (shared AI Data Prep for Option 1 & 2) ----
-EXTRACTION = [
-    ("S3 Upload",
-     "PDF or image lands in an approved S3 bucket (in-account, encrypted). No open/third-party endpoints."),
-    ("Lambda: Triage",
-     "Inspect type, size, PDF page count. Extract embedded text where possible; select only relevant pages. Route image vs PDF."),
-    ("Claude on Bedrock",
-     "Managed model (no self-hosting). Shared JSON schema; return only required fields. Record inputTokens + outputTokens + modelId."),
-    ("Validate + Log",
-     "Validate JSON; log token usage, latency, retryCount to CloudWatch (no PII). Retry/escalate only invalid or low-confidence."),
-    ("Cost per Document",
-     "Metric = cost per SUCCESSFUL extraction. Tiered model routing: Haiku routine, Sonnet baseline, Opus hard docs only."),
+# ---- SPARKS AI Search cost model (text search; Option 1 & 2) ----
+COSTMODEL = [
+    ("1. Embed (one-time)",
+     "Titan embeds each SPARKS document once into the vector index. 50k-200k docs = only a few dollars, once. Re-embed only changed docs."),
+    ("2. Ask a question",
+     "User asks in natural language. ~4,000 input tokens (retrieved context + question) per question. Shared by Option 1 & Option 2."),
+    ("3a. Option 1 (RAG)",
+     "ONE Claude call -> grounded answer (~500 out). About 2 cents per question on Sonnet (~0.5 cents on Haiku)."),
+    ("3b. Option 2 (Agentic)",
+     "~3 Claude turns (plan -> tools -> answer). About 5 cents per question - roughly 2.5-3x Option 1."),
+    ("4. Monthly / Yearly",
+     "200 q/day: Option 1 ~$240-$490/mo (~$3-6K/yr); Option 2 ~$390-$640/mo (~$5-8K/yr), incl. fixed AWS infra band."),
 ]
-EXTRACTION_NOTES = [
-    "Managed AWS + Bedrock only - no open-source / self-hosted models.",
-    "Biggest lever: don't send a whole multi-page PDF when 1-2 pages suffice. Return only required JSON fields.",
-    "AWS Budgets hard cap; figures measured in the POC (50-100 docs) before any quote.",
+COSTMODEL_NOTES = [
+    "Managed AWS + Claude on Bedrock only - NO open-source / self-hosted models.",
+    "$0 today; spend starts only after FED approval, under an AWS Budgets hard cap.",
+    "Planning estimate ~70-90% accurate; confirmed by the Dev pilot against live Bedrock rates.",
 ]
 
 if __name__ == "__main__":
@@ -232,8 +232,8 @@ if __name__ == "__main__":
               "Option 2 - Agentic Hybrid Search",
               "An orchestration layer chooses approved search tools for complex, multi-step questions",
               OPTION2, OPTION2_NOTES)
-    build_pdf("AI_Cost_Extraction_Flow.pdf",
-              "AI Image / PDF Extraction - Cost-Optimized Flow",
-              "Shared AI Data Prep for Option 1 & 2 - managed AWS + Bedrock only, measured per-document cost",
-              EXTRACTION, EXTRACTION_NOTES)
-    print("Wrote: Option 1 - RAG.pdf, Option 2 - Agentic.pdf, AI_Cost_Extraction_Flow.pdf")
+    build_pdf("AI_Cost_Model_Option1_Option2.pdf",
+              "SPARKS AI Search - Cost Model (Option 1 & Option 2)",
+              "Managed AWS + Bedrock only - one-time embedding + per-question inference; monthly & yearly",
+              COSTMODEL, COSTMODEL_NOTES)
+    print("Wrote: Option 1 - RAG.pdf, Option 2 - Agentic.pdf, AI_Cost_Model_Option1_Option2.pdf")
