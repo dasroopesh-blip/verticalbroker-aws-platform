@@ -1,0 +1,247 @@
+<!doctype html><html lang='en'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width, initial-scale=1'><title>SPARKS AI Search — Proposal</title><style>
+:root { --navy:#1F3864; --blue:#2E74B5; }
+* { box-sizing: border-box; }
+body { font-family: Calibri, 'Segoe UI', Arial, sans-serif; color:#222; line-height:1.5;
+       max-width: 900px; margin: 2rem auto; padding: 0 1.5rem; }
+h1 { color: var(--navy); font-size: 1.9rem; margin: 1.4rem 0 .6rem; }
+h2 { color: var(--blue); font-size: 1.35rem; border-bottom: 2px solid var(--blue);
+     padding-bottom: 4px; margin: 1.6rem 0 .6rem; }
+h3 { color: var(--blue); font-size: 1.1rem; margin: 1.1rem 0 .4rem; }
+p, li { font-size: .97rem; }
+code { font-family: Consolas, monospace; background:#f4f6f8; color:#A6261D;
+       padding: 1px 4px; border-radius: 3px; font-size: .9em; }
+blockquote { margin:.6rem 0; padding:.4rem .9rem; border-left:3px solid var(--blue);
+             background:#f6f9fc; color:#555; font-style: italic; }
+table { border-collapse: collapse; width:100%; margin: .8rem 0; font-size:.92rem; }
+th, td { border:1px solid #ccc; padding:6px 9px; text-align:left; vertical-align:top; }
+th { background:#eef2f7; }
+hr { border:0; border-top:1px solid #ccc; margin:1.4rem 0; }
+a { color: var(--blue); }
+/* ---- flow diagram ---- */
+.flow-wrap { margin: 1rem 0 1.4rem; }
+.flow-title { text-align:center; font-weight:700; color:var(--navy); font-size:1.05rem; margin-bottom:.7rem; }
+.flow { display:flex; align-items:stretch; justify-content:center; flex-wrap:nowrap; gap:0; }
+.flow-box { flex:1 1 0; min-width:0; border:2px solid; border-radius:10px; padding:10px 10px;
+            text-align:center; background:#fff; }
+.flow-box .fb-h { font-weight:700; font-size:.9rem; margin-bottom:5px; }
+.flow-box .fb-b { font-size:.76rem; line-height:1.35; color:#333; }
+.flow-box.c0 { border-color:#6C8EBF; background:#DAE8FC; }
+.flow-box.c1 { border-color:#D79B00; background:#FFE6CC; }
+.flow-box.c2 { border-color:#9673A6; background:#E1D5E7; }
+.flow-box.c3 { border-color:#82B366; background:#D5E8D4; }
+.flow-box.c4 { border-color:#6C8EBF; background:#DAE8FC; }
+.flow-arrow { display:flex; align-items:center; color:#2E74B5; font-size:1rem; padding:0 4px; }
+.flow-notes { margin:.6rem 0 0; font-size:.82rem; color:#444; }
+@media print {
+  .flow-box .fb-b { font-size:8pt; }
+  .flow-wrap, .flow { page-break-inside: avoid; }
+}
+@media print {
+  body { margin:0; max-width:none; font-size:11pt; }
+  h1 { font-size:18pt; } h2 { font-size:14pt; } h3 { font-size:12pt; }
+  h2, h3 { page-break-after: avoid; }
+  table, blockquote, tr { page-break-inside: avoid; }
+  a { color:#222; text-decoration:none; }
+}
+</style></head><body><h1>SPARKS AI Search — AI Cost Analysis (Image / PDF Extraction)</h1>
+<p><strong>SB-6562 companion — measured-cost methodology for Claude on Amazon Bedrock</strong></p>
+<blockquote><strong>Purpose:</strong> DOT requires AI cost to be based on <strong>actual, measured token usage</strong>, not guesses. This document gives (a) the exact cost formula, (b) a worked business scenario for image/PDF → JSON extraction, (c) model/prompt/PDF cost drivers, and (d) a POC plan to capture real token counts from Bedrock before committing to a model.</blockquote>
+<blockquote><strong>Headline:</strong> The business metric that matters is <strong>cost per successfully extracted document</strong> — not cost per million tokens. A cheaper model that produces more extraction errors (more manual review / retries) can cost more overall.</blockquote>
+<blockquote><strong>Closed, managed, governed — no open systems.</strong> Per DOT requirements, this recommendation uses <strong>only managed, enterprise-approved AWS services and vendor-hosted foundation models accessed through Amazon Bedrock.</strong> We do <strong>not</strong> propose self-hosted / open-weight / open-source models (e.g. Llama, Mistral, Falcon on self-managed GPUs), community model servers, or any component that sits outside the approved AWS boundary. This keeps data in-account, keeps least-privilege IAM/KMS/CloudTrail governance intact, gives a single accountable vendor + support path, and makes cost a predictable, auditable <strong>pay-per-token</strong> line item rather than self-managed infrastructure. See §0.</blockquote>
+<hr/>
+<h2>0. Design &amp; sourcing constraints (must hold for every option)</h2>
+<table>
+<tr><th>Constraint</th><th>Requirement</th></tr>
+<tr><td><strong>Models</strong></td><td>Vendor-hosted foundation models via <strong>Amazon Bedrock only</strong> (Anthropic Claude family). <strong>No open-weight / open-source / self-hosted models.</strong></td></tr>
+<tr><td><strong>Hosting</strong></td><td>Fully managed AWS services (Bedrock, Lambda, S3, OpenSearch Serverless, API Gateway, CloudWatch). <strong>Nothing to patch, GPU-manage, or run as a community server.</strong></td></tr>
+<tr><td><strong>Data boundary</strong></td><td>All data and inference stay <strong>inside the approved AWS account/region</strong>. Read-only access to approved SPARKS data; no third-party/open endpoints.</td></tr>
+<tr><td><strong>Governance</strong></td><td>Least-privilege <strong>IAM</strong>, <strong>KMS</strong> encryption, <strong>CloudTrail</strong> audit, Bedrock Guardrails, model-invocation logging.</td></tr>
+<tr><td><strong>Cost model</strong></td><td><strong>Pay-per-token</strong> (measured), with <strong>AWS Budgets hard cap</strong> — not self-managed infrastructure with unpredictable scaling cost.</td></tr>
+<tr><td><strong>Accountability</strong></td><td>Single vendor + AWS support path; no community-maintained dependencies in the critical path.</td></tr>
+</table>
+<p>Every cost figure and model choice below is evaluated <strong>within</strong> these constraints.</p>
+<hr/>
+<h2>How this fits Option 1 (RAG) and Option 2 (Agentic)</h2>
+<p>This cost model is <strong>not a separate workstream</strong> — it prices the AI work that both proposal options depend on. Image/PDF → JSON extraction is part of <strong>AI Data Prep</strong>, which produces the curated search content both options retrieve from.</p>
+<table>
+<tr><th></th><th><strong>Option 1 — RAG</strong></th><th><strong>Option 2 — Agentic</strong></th></tr>
+<tr><td>Where extraction cost lands</td><td><strong>AI Data Prep</strong> — extract/enrich approved documents (incl. image/PDF → JSON) into the curated search content, <strong>mostly one-time + on change</strong></td><td>Same AI Data Prep (reused) — <strong>no extra extraction cost</strong>; Option 2 adds cost only in orchestration</td></tr>
+<tr><td>Ongoing model cost</td><td><strong>1 Claude answer call per question</strong> → ~1–3¢/question</td><td><strong>Several Claude calls per question</strong> (plan → tools → answer) → ~4–10¢/question</td></tr>
+<tr><td>Embedding cost</td><td>One-time per document + re-embed on change</td><td>Reuses Option 1's embeddings — no additional embedding cost</td></tr>
+<tr><td>Cost driver to watch</td><td>Document/PDF size during prep; output JSON size</td><td>Same, <strong>plus</strong> number of agent tool-calls/turns per question</td></tr>
+<tr><td>Model tiering applies</td><td>Yes — Haiku for routine extraction, Sonnet baseline, Opus only for hard docs</td><td>Same tiering, plus a cheaper model for intent/classify steps and the stronger model only for the final grounded answer</td></tr>
+</table>
+<p><strong>So the two cost layers are:</strong></p>
+<ol>
+<li><strong>Prep/extraction (shared by both options)</strong> — the image/PDF → JSON scenario in §2–§7. Dominated by document size and model/prompt efficiency; mostly one-time + incremental.</li>
+<li><strong>Per-question inference</strong> — Option 1 is a single call (cheap); Option 2 is multi-call (a few × more). Covered in §3 and the per-question figures.</li>
+</ol>
+<p>Everything below quantifies layer 1 (the extraction/prep cost) with a measured methodology; the per-question figures for Option 1 vs Option 2 are summarized in §3 and in the deck's cost slide.</p>
+<hr/>
+<h2>1. The cost formula</h2>
+<p>```</p>
+<p>Total Cost ($) = [ N × (I × Pi + O × Po) ] / 1,000,000</p>
+<p>```</p>
+<table>
+<tr><th>Symbol</th><th>Meaning</th></tr>
+<tr><td><code>N</code></td><td>Number of extraction requests</td></tr>
+<tr><td><code>I</code></td><td>Input tokens per request (document/image tokens <strong>+</strong> prompt tokens)</td></tr>
+<tr><td><code>O</code></td><td>Output tokens per request (the extracted JSON)</td></tr>
+<tr><td><code>Pi</code></td><td>Price per <strong>million input</strong> tokens</td></tr>
+<tr><td><code>Po</code></td><td>Price per <strong>million output</strong> tokens</td></tr>
+</table>
+<p><strong>All token counts and prices below are illustrative planning assumptions.</strong> Actual cost depends on image size, PDF page count/mode, model pricing, caching, retries, and Bedrock configuration. The POC in §6 replaces these with measured values.</p>
+<hr/>
+<h2>2. Business scenario — image/PDF processing</h2>
+<p>Application extracts structured fields (manufacturer, model, year, VIN, investigation details, …) into JSON for downstream processing.</p>
+<h3>Volume</h3>
+<table>
+<tr><th>Metric</th><th>Value</th></tr>
+<tr><td>Images per hour</td><td>100</td></tr>
+<tr><td>Images per 8-hour business day</td><td>800</td></tr>
+<tr><td>Images per month (22 business days)</td><td>17,600</td></tr>
+</table>
+<h3>Token assumptions (illustrative)</h3>
+<table>
+<tr><th>Component</th><th>Tokens</th></tr>
+<tr><td>Image + extraction prompt (input)</td><td>1,700</td></tr>
+<tr><td>Generated structured JSON (output)</td><td>300</td></tr>
+</table>
+<hr/>
+<h2>3. Model cost comparison (same 1,700 in / 300 out per request)</h2>
+<p>Illustrative Bedrock/Anthropic-style pricing. <strong>Confirm live rates for your Bedrock account/region before quoting.</strong></p>
+<table>
+<tr><th>Model</th><th>Input $/1M</th><th>Output $/1M</th><th>Per hour (100)</th><th>Per month (17,600)</th></tr>
+<tr><td><strong>Claude Haiku</strong></td><td>$1</td><td>$5</td><td>$0.32</td><td><strong>$56.32</strong></td></tr>
+<tr><td><strong>Claude Sonnet</strong> (baseline)</td><td>$2</td><td>$10</td><td>$0.64</td><td><strong>$112.64</strong></td></tr>
+<tr><td><strong>Claude Opus</strong></td><td>$4</td><td>$20</td><td>$1.28</td><td><strong>$225.28</strong></td></tr>
+</table>
+<p><strong>Reading it:</strong></p>
+<ul>
+<li><strong>Sonnet</strong> baseline ≈ <strong>$0.64/hr → ~$113/month</strong> at this volume.</li>
+<li><strong>Haiku</strong> ≈ <strong>half</strong> of Sonnet (~$56/month) — if accuracy is comparable on routine documents.</li>
+<li><strong>Opus</strong> ≈ <strong>2× Sonnet</strong> (~$225/month) — only justified if it *materially* reduces extraction errors / manual review. For routine image/PDF extraction, Opus is usually <strong>not</strong> worth the premium.</li>
+</ul>
+<blockquote><strong>Recommendation:</strong> Keep <strong>Sonnet as the baseline</strong>; route routine/clean documents to <strong>Haiku</strong>; reserve <strong>Opus</strong> (or Sonnet) for complex documents or failed validations. Decide with data, not defaults.</blockquote>
+<hr/>
+<h2>4. Does the prompt matter? (and PDF vs image)</h2>
+<p>Yes — but the manager's "same prompt skyrockets cost" concern is only <strong>partly</strong> correct. What drives cost is <strong>total tokens</strong>, not prompt wording alone. Sharing one schema between PDFs and images is fine; the big levers are <strong>document size</strong> and <strong>output volume</strong>.</p>
+<h3>Cost drivers, ranked</h3>
+<table>
+<tr><th>Factor</th><th>Cost impact</th><th>Recommendation</th></tr>
+<tr><td><strong>Sending a whole multi-page PDF</strong></td><td><strong>Largest</strong> — a 20-page PDF ≫ a single image</td><td>Extract embedded text / select only relevant pages</td></tr>
+<tr><td>Large JSON response</td><td>High (output tokens priced higher)</td><td>Return <strong>only required fields</strong></td></tr>
+<tr><td>Long prompt repeated every request</td><td>Moderate (billed each request)</td><td>Keep instructions concise &amp; reusable</td></tr>
+<tr><td>High-resolution images</td><td>Moderate</td><td>Use appropriate resolution</td></tr>
+<tr><td>Repeated examples in prompt</td><td>Moderate</td><td>Only examples that improve accuracy</td></tr>
+<tr><td>Retrying failed extractions</td><td>Adds up</td><td>Validate + retry <strong>selectively</strong></td></tr>
+<tr><td>Same prompt for PDF &amp; image</td><td><strong>Not inherently expensive</strong></td><td>Separate only the document-specific instruction</td></tr>
+</table>
+<h3>Worked example — prompt length (single image, 1,500 doc tokens, 300 out)</h3>
+<table>
+<tr><th></th><th>Optimized prompt</th><th>Long generic prompt</th></tr>
+<tr><td>Image (document) tokens</td><td>1,500</td><td>1,500</td></tr>
+<tr><td>Prompt tokens</td><td>200</td><td>2,000</td></tr>
+<tr><td><strong>Total input</strong></td><td><strong>1,700</strong></td><td><strong>3,500</strong></td></tr>
+<tr><td>Output tokens</td><td>300</td><td>300</td></tr>
+<tr><td>Cost / 100 requests</td><td><strong>$0.64</strong></td><td><strong>$1.00</strong></td></tr>
+<tr><td>Monthly (17,600)</td><td><strong>$112.64</strong></td><td><strong>$176.00</strong></td></tr>
+</table>
+<p>→ An unnecessarily long prompt raises cost <strong>~56%</strong> here. But a 20-page PDF can cost far more than any single image even with an identical prompt — <strong>document size dominates.</strong></p>
+<h3>POC comparison — image vs 10-page PDF (illustrative)</h3>
+<table>
+<tr><th>Metric per request</th><th>Image: long</th><th>Image: short</th><th>PDF: long</th><th>PDF: short</th></tr>
+<tr><td>Document tokens</td><td>1,500</td><td>1,500</td><td>15,000</td><td>15,000</td></tr>
+<tr><td>Prompt tokens</td><td>2,000</td><td>200</td><td>2,000</td><td>200</td></tr>
+<tr><td>Output tokens</td><td>500</td><td>300</td><td>500</td><td>300</td></tr>
+<tr><td><strong>Total cost / request</strong></td><td><strong>$0.0120</strong></td><td><strong>$0.0064</strong></td><td><strong>$0.0390</strong></td><td><strong>$0.0334</strong></td></tr>
+</table>
+<ul>
+<li><strong>Images:</strong> optimizing the prompt saves <strong>~47%</strong> (prompt+output are a big share of a small request).</li>
+<li><strong>PDFs:</strong> optimizing the prompt saves only <strong>~14%</strong> — because the 15,000 <strong>document</strong> tokens dominate. (That 15,000 is an assumption; real PDF usage depends on pages, images, layout, and processing mode.)</li>
+</ul>
+<p><strong>Takeaway:</strong> For PDFs, the highest-impact question is not prompt wording — it is *"are we sending the entire multi-page PDF when we only need 1–2 pages?"*</p>
+<hr/>
+<h2>5. What matters most in the SPARKS Lambda architecture</h2>
+<p>Because extraction runs <strong>S3 → Lambda → Claude on Bedrock → JSON</strong>, the biggest cost levers are <strong>what Lambda sends, how many times it invokes Claude, and whether extraction succeeds first try.</strong></p>
+<p><strong>Optimized flow (see diagram <code>AI_Cost_Extraction_Flow.pdf</code>):</strong></p>
+<p>```</p>
+<p>S3 (PDF / image uploaded)</p>
+<p>  → Lambda: inspect file type, size, page count; extract embedded text where appropriate; select relevant pages</p>
+<p>      ├─ Image route: one image + concise image prompt (appropriate resolution)</p>
+<p>      └─ PDF route:   relevant text/pages + PDF-specific instruction</p>
+<p>  → Amazon Bedrock → Claude: shared JSON schema; return only required fields; record inputTokens/outputTokens/modelId</p>
+<p>  → Lambda: validate JSON → save → log cost; retry/escalate ONLY invalid or low-confidence cases</p>
+<p>```</p>
+<h3>Six things to check in the existing Lambda first</h3>
+<table>
+<tr><th>#</th><th>Check in Lambda</th><th>Why it matters</th></tr>
+<tr><td>1</td><td>Does Lambda send the <strong>entire</strong> PDF?</td><td>A 30-page PDF can consume far more tokens than one image</td></tr>
+<tr><td>2</td><td>Does Lambda call Claude <strong>once or many times</strong> per doc?</td><td>Multiple calls multiply token charges</td></tr>
+<tr><td>3</td><td>Does it reuse one <strong>large</strong> prompt every request?</td><td>Repeated instructions billed each request unless caching applies</td></tr>
+<tr><td>4</td><td>Are PDFs converted into <strong>page images</strong>?</td><td>Sending every rendered page can greatly increase image tokens</td></tr>
+<tr><td>5</td><td>How large is the returned <strong>JSON</strong>?</td><td>Output tokens are priced higher than input</td></tr>
+<tr><td>6</td><td>What happens on <strong>errors/timeouts</strong>?</td><td>Retries add Bedrock charges + Lambda runtime</td></tr>
+</table>
+<p>Also track <strong>Lambda duration + memory</strong> — infra cost — though model inference usually dominates for extraction workloads.</p>
+<hr/>
+<h2>6. POC — capture REAL token counts (the DOT ask)</h2>
+<p><strong>Objective:</strong> determine <strong>cost per successfully processed document</strong> and pick the most cost-efficient model <strong>without compromising data accuracy.</strong></p>
+<p><strong>Method:</strong></p>
+<ol>
+<li>Start with <strong>10 images + 10 PDFs</strong>, expand to <strong>50–100 representative documents</strong>.</li>
+<li>Hold <strong>model ID, documents, temperature, processing mode, and required JSON fields identical</strong> between prompt versions (existing vs optimized).</li>
+<li>Capture Bedrock Converse usage per request and log to CloudWatch (no sensitive content / PII):</li>
+</ol>
+<p>```python</p>
+<p>usage = response["usage"]</p>
+<p>print("Input tokens:",  usage["inputTokens"])</p>
+<p>print("Output tokens:", usage["outputTokens"])</p>
+<p>print("Latency ms:",    response["metrics"]["latencyMs"])</p>
+<p>```</p>
+<p><strong>Per-request log record (sample values, not measured):</strong></p>
+<p>```json</p>
+<p>{</p>
+<p>  "documentType": "PDF",</p>
+<p>  "pageCount": 20,</p>
+<p>  "modelId": "configured-model-id",</p>
+<p>  "promptVersion": "optimized-v1",</p>
+<p>  "bedrockCalls": 1,</p>
+<p>  "inputTokens": 12000,</p>
+<p>  "outputTokens": 350,</p>
+<p>  "latencyMs": 2800,</p>
+<p>  "extractionValid": true,</p>
+<p>  "retryCount": 0</p>
+<p>}</p>
+<p>```</p>
+<p><strong>Compare across Sonnet vs Haiku (and Opus on hard docs only):</strong> input tokens, output tokens, extraction accuracy, retry rate, latency, and <strong>total cost per *successful* document.</strong></p>
+<p><strong>Strongest POC outcome:</strong> *same extraction accuracy + fewer tokens + fewer retries = verified cost optimization.*</p>
+<blockquote><strong>Prompt caching note:</strong> Bedrock supports prompt caching for eligible models and can cut cost when large identical prompt content is reused — but it has per-model minimum-token thresholds and cache-write costs, so it may not help a short ~200-token prompt. Evaluate against measured usage.</blockquote>
+<hr/>
+<h2>7. Recommended extraction prompt design</h2>
+<p>One <strong>shared schema</strong>, plus a short <strong>document-type-specific</strong> instruction.</p>
+<p><strong>Common instructions</strong></p>
+<p>```</p>
+<p>Extract vehicle-related information from the supplied document.</p>
+<p>Return ONLY valid JSON with these fields:</p>
+<p>{ "manufacturer": null, "model": null, "year": null, "vin": null, "investigation_number": null }</p>
+<p>Rules:</p>
+<ul>
+<li>Use only information explicitly present.</li>
+<li>Use null for missing or unreadable fields.</li>
+<li>Do not guess. Do not add explanations or Markdown.</li>
+</ul>
+<p>```</p>
+<p><strong>Image add-on:</strong> <code>Read the supplied image, including visible labels, handwriting, and tables where legible.</code></p>
+<p><strong>PDF add-on:</strong> <code>Extract information across the relevant PDF pages. Avoid duplicating repeated headers or values.</code></p>
+<hr/>
+<h2>8. Recommendations for the team / FED</h2>
+<ol>
+<li><strong>Measure before quoting.</strong> Run the POC; replace every illustrative number here with Bedrock-measured token counts and current account pricing.</li>
+<li><strong>Baseline Sonnet, test Haiku for routine docs, reserve Opus for hard docs</strong> — tiered routing, decided by accuracy data.</li>
+<li><strong>Attack PDF page volume first</strong> — the single largest lever; don't send whole multi-page PDFs when 1–2 pages suffice.</li>
+<li><strong>Return only required JSON fields</strong>, validate, and retry selectively.</li>
+<li><strong>Track cost per *successful* document</strong>, not cost per token — accuracy and retries are part of true cost.</li>
+<li><strong>Set an AWS Budgets hard cap</strong> and dashboard input/output tokens, latency, retry rate, and cost per document.</li>
+</ol>
+<blockquote><strong>Pricing verification:</strong> Model prices change — verify the current Anthropic/Bedrock rates for your region and model IDs at approval time. The figures here are a reproducible *method*, not a quote.</blockquote></body></html>
